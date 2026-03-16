@@ -8,43 +8,53 @@ const EXAMPLES = [
   'https://notion.so',
 ];
 
-const MODELS = [
+const MODEL_GROUPS = [
   {
-    id: 'gemini-2.5-flash-lite',
-    label: 'Gemini 2.5 Flash Lite',
-    badge: '⚡ Fast',
-    badgeColor: '#1ef5a0',
-    desc: 'Fastest Gemini output',
+    group: 'Google',
+    models: [
+      { id: 'gemini-2.5-flash-lite', label: 'Flash Lite',  badge: '⚡ Fast',    badgeColor: '#1ef5a0', desc: 'Fastest output' },
+      { id: 'gemini-2.5-flash',      label: 'Flash',       badge: '🚀 Smart',   badgeColor: '#00d4e8', desc: 'Best Gemini quality' },
+    ],
   },
   {
-    id: 'gemini-2.5-flash',
-    label: 'Gemini 2.5 Flash',
-    badge: '🚀 Smart',
-    badgeColor: '#00d4e8',
-    desc: 'Best Gemini quality',
+    group: 'Anthropic',
+    models: [
+      { id: 'claude-sonnet-4-6', label: 'Sonnet', badge: '◈ Balanced', badgeColor: '#a897ff', desc: 'High quality + fast' },
+      { id: 'claude-opus-4-5',   label: 'Opus',   badge: '✦ Best',     badgeColor: '#f5a623', desc: 'Max quality' },
+    ],
   },
   {
-    id: 'claude-sonnet-4-6',
-    label: 'Claude Sonnet',
-    badge: '◈ Balanced',
-    badgeColor: '#a897ff',
-    desc: 'High quality + fast',
+    group: 'OpenAI',
+    models: [
+      { id: 'gpt-4o-mini', label: 'GPT-4o mini', badge: '💚 Cheap',  badgeColor: '#74c991', desc: 'Fast & affordable' },
+      { id: 'gpt-4o',      label: 'GPT-4o',      badge: '🔥 Strong', badgeColor: '#10a37f', desc: 'GPT flagship model' },
+    ],
   },
   {
-    id: 'claude-opus-4-5',
-    label: 'Claude Opus',
-    badge: '✦ Best',
-    badgeColor: '#f5a623',
-    desc: 'Maximum quality output',
+    group: 'Groq',
+    models: [
+      { id: 'llama-3.1-8b-instant',    label: 'Llama 3.1 8B',  badge: '⚡ Instant', badgeColor: '#f97316', desc: 'Ultra-fast inference' },
+      { id: 'llama-3.3-70b-versatile', label: 'Llama 3.3 70B', badge: '🦙 Power',   badgeColor: '#fb923c', desc: 'Best open-source' },
+    ],
+  },
+  {
+    group: 'DeepSeek',
+    models: [
+      { id: 'deepseek-chat', label: 'DeepSeek V3', badge: '🐋 Value', badgeColor: '#60a5fa', desc: 'GPT-4 quality, low cost' },
+    ],
   },
 ];
 
+// Flat list for backwards compat
+const MODELS = MODEL_GROUPS.flatMap(g => g.models);
+
 export default function Home() {
-  const [url, setUrl]           = useState('');
-  const [framework, setFramework] = useState('react');
-  const [model, setModel]       = useState('gemini-2.5-flash');
-  const [loading, setLoading]   = useState(false);
-  const [error, setError]       = useState('');
+  const [url, setUrl]               = useState('');
+  const [framework, setFramework]   = useState('react');
+  const [model, setModel]           = useState('gemini-2.5-flash');
+  const [loading, setLoading]       = useState(false);
+  const [error, setError]           = useState('');
+  const [bypassCache, setBypassCache] = useState(false);
   const [recentProjects, setRecentProjects] = useState([]);
   const navigate = useNavigate();
 
@@ -64,7 +74,7 @@ export default function Home() {
       const res = await fetch('/api/redesign', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: url.trim(), framework, model }),
+        body: JSON.stringify({ url: url.trim(), framework, model, bypassCache }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to start');
@@ -152,27 +162,34 @@ export default function Home() {
           {/* Model selector */}
           <div style={styles.modelRow}>
             <span style={styles.fwLabel}>AI model</span>
-            <div style={styles.modelGrid}>
-              {MODELS.map(m => {
-                const active = model === m.id;
-                return (
-                  <button
-                    key={m.id}
-                    type="button"
-                    onClick={() => setModel(m.id)}
-                    style={{ ...styles.modelCard, ...(active ? styles.modelCardActive : {}) }}
-                  >
-                    <div style={styles.modelTop}>
-                      <span style={styles.modelName}>{m.label}</span>
-                      <span style={{ ...styles.modelBadge, color: m.badgeColor, borderColor: m.badgeColor + '44', background: m.badgeColor + '12' }}>
-                        {m.badge}
-                      </span>
-                    </div>
-                    <span style={styles.modelDesc}>{m.desc}</span>
-                    {active && <span style={styles.modelCheck}>✓</span>}
-                  </button>
-                );
-              })}
+            <div style={styles.modelGroups}>
+              {MODEL_GROUPS.map(g => (
+                <div key={g.group} style={styles.modelGroup}>
+                  <span style={styles.modelGroupLabel}>{g.group}</span>
+                  <div style={styles.modelGroupRow}>
+                    {g.models.map(m => {
+                      const active = model === m.id;
+                      return (
+                        <button
+                          key={m.id}
+                          type="button"
+                          onClick={() => setModel(m.id)}
+                          style={{ ...styles.modelCard, ...(active ? styles.modelCardActive : {}) }}
+                        >
+                          <div style={styles.modelTop}>
+                            <span style={styles.modelName}>{m.label}</span>
+                            <span style={{ ...styles.modelBadge, color: m.badgeColor, borderColor: m.badgeColor + '44', background: m.badgeColor + '12' }}>
+                              {m.badge}
+                            </span>
+                          </div>
+                          <span style={styles.modelDesc}>{m.desc}</span>
+                          {active && <span style={styles.modelCheck}>✓</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
 
@@ -190,6 +207,28 @@ export default function Home() {
               </>
             )}
           </button>
+
+          {/* Bypass cache toggle */}
+          <label style={styles.cacheRow}>
+            <span style={styles.cacheCheckbox}>
+              <input
+                type="checkbox"
+                checked={bypassCache}
+                onChange={e => setBypassCache(e.target.checked)}
+                style={styles.cacheInput}
+              />
+              <span style={{
+                ...styles.cacheBox,
+                ...(bypassCache ? styles.cacheBoxChecked : {}),
+              }}>
+                {bypassCache && <span style={styles.cacheCheck}>✓</span>}
+              </span>
+            </span>
+            <span style={styles.cacheLabelText}>
+              Bypass cache
+              <span style={styles.cacheHint}> — force a fresh generation</span>
+            </span>
+          </label>
         </form>
 
         {/* Recent projects */}
@@ -421,10 +460,31 @@ const styles = {
     padding: '6px 12px',
     marginBottom: 6,
   },
-  modelGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(4, 1fr)',
-    gap: 6,
+  modelGroups: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 8,
+  },
+  modelGroup: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  modelGroupLabel: {
+    fontSize: 10,
+    color: 'var(--text-3)',
+    fontFamily: 'var(--font-mono)',
+    minWidth: 60,
+    paddingTop: 10,
+    textAlign: 'right',
+    flexShrink: 0,
+    letterSpacing: '0.04em',
+  },
+  modelGroupRow: {
+    display: 'flex',
+    gap: 5,
+    flex: 1,
+    flexWrap: 'wrap',
   },
   modelCard: {
     position: 'relative',
@@ -438,6 +498,8 @@ const styles = {
     display: 'flex',
     flexDirection: 'column',
     gap: 4,
+    minWidth: 110,
+    flex: '1 1 110px',
   },
   modelCardActive: {
     background: 'rgba(124,106,247,0.1)',
@@ -588,4 +650,56 @@ const styles = {
   recentTokens: { display: 'flex', gap: 4, margin: '2px 0' },
   colorDot: { width: 10, height: 10, borderRadius: '50%', border: '1px solid rgba(255,255,255,0.1)' },
   recentMeta: { fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--font-mono)' },
+
+  // Bypass cache toggle
+  cacheRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    padding: '8px 14px 4px',
+    cursor: 'pointer',
+    userSelect: 'none',
+  },
+  cacheCheckbox: {
+    position: 'relative',
+    display: 'inline-flex',
+    alignItems: 'center',
+    flexShrink: 0,
+  },
+  cacheInput: {
+    position: 'absolute',
+    opacity: 0,
+    width: 0,
+    height: 0,
+  },
+  cacheBox: {
+    width: 14,
+    height: 14,
+    borderRadius: 4,
+    border: '1px solid var(--border-2)',
+    background: 'var(--bg-3)',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    transition: 'all 0.15s',
+  },
+  cacheBoxChecked: {
+    background: 'rgba(124,106,247,0.2)',
+    borderColor: 'rgba(124,106,247,0.6)',
+  },
+  cacheCheck: {
+    fontSize: 9,
+    color: 'var(--violet-bright)',
+    fontWeight: 700,
+    lineHeight: 1,
+  },
+  cacheLabelText: {
+    fontSize: 11,
+    color: 'var(--text-3)',
+    fontFamily: 'var(--font-mono)',
+  },
+  cacheHint: {
+    color: 'var(--text-3)',
+    opacity: 0.6,
+  },
 };

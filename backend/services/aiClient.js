@@ -1,14 +1,24 @@
 /**
- * Unified AI client — wraps Anthropic Claude and Google Gemini
- * behind a single interface.
+ * Unified AI client — wraps Anthropic Claude, Google Gemini,
+ * OpenAI, Groq, and DeepSeek behind a single interface.
  */
 
 const SUPPORTED_MODELS = {
-  'claude-opus-4-5':      'anthropic',
-  'claude-sonnet-4-6':    'anthropic',
-  'claude-haiku-4-5':     'anthropic',
-  'gemini-2.5-flash':     'gemini',
-  'gemini-2.5-flash-lite': 'gemini',
+  // Anthropic
+  'claude-opus-4-5':        'anthropic',
+  'claude-sonnet-4-6':      'anthropic',
+  'claude-haiku-4-5':       'anthropic',
+  // Google
+  'gemini-2.5-flash':       'gemini',
+  'gemini-2.5-flash-lite':  'gemini',
+  // OpenAI
+  'gpt-4o':                 'openai',
+  'gpt-4o-mini':            'openai',
+  // Groq (free tier — fastest inference)
+  'llama-3.3-70b-versatile': 'groq',
+  'llama-3.1-8b-instant':    'groq',
+  // DeepSeek (cheapest, great code quality)
+  'deepseek-chat':           'deepseek',
 };
 
 function getProvider(model) {
@@ -17,11 +27,16 @@ function getProvider(model) {
 
 // Max output tokens each model actually supports
 const MODEL_MAX_TOKENS = {
-  'claude-opus-4-5':       16000,
-  'claude-sonnet-4-6':     16000,
-  'claude-haiku-4-5':      8192,
-  'gemini-2.5-flash':      65536,  // Gemini 2.5 Flash supports up to 65k output tokens
-  'gemini-2.5-flash-lite': 8192,
+  'claude-opus-4-5':         16000,
+  'claude-sonnet-4-6':       16000,
+  'claude-haiku-4-5':        8192,
+  'gemini-2.5-flash':        65536,
+  'gemini-2.5-flash-lite':   8192,
+  'gpt-4o':                  16384,
+  'gpt-4o-mini':             16384,
+  'llama-3.3-70b-versatile': 32768,
+  'llama-3.1-8b-instant':    8192,
+  'deepseek-chat':           8192,
 };
 
 function createAIClient(model = 'claude-opus-4-5') {
@@ -34,9 +49,11 @@ function createAIClient(model = 'claude-opus-4-5') {
     modelMax,
 
     async complete(system, user, maxTokens, options = {}) {
-      // Always use the model's real max — never the old 4096 default
       const tokens = Math.min(maxTokens || modelMax, modelMax);
-      if (provider === 'gemini') return callGemini(model, system, user, tokens, options);
+      if (provider === 'gemini')   return callGemini(model, system, user, tokens, options);
+      if (provider === 'openai')   return callOpenAICompat('openai',   model, system, user, tokens, options);
+      if (provider === 'groq')     return callOpenAICompat('groq',     model, system, user, tokens, options);
+      if (provider === 'deepseek') return callOpenAICompat('deepseek', model, system, user, tokens, options);
       return callClaude(model, system, user, tokens, options);
     },
   };
@@ -84,6 +101,36 @@ async function callGemini(model, system, user, maxTokens, options = {}) {
 
   const result = await genModel.generateContent(user);
   return result.response.text();
+}
+
+// ── OpenAI-compatible (OpenAI / Groq / DeepSeek) ─────────────────────────────
+
+const OPENAI_COMPAT_CONFIG = {
+  openai:   { baseURL: 'https://api.openai.com/v1',        envKey: 'OPENAI_API_KEY'   },
+  groq:     { baseURL: 'https://api.groq.com/openai/v1',   envKey: 'GROQ_API_KEY'     },
+  deepseek: { baseURL: 'https://api.deepseek.com',         envKey: 'DEEPSEEK_API_KEY' },
+};
+
+async function callOpenAICompat(provider, model, system, user, maxTokens, options = {}) {
+  const { OpenAI } = require('openai');
+  const { baseURL, envKey } = OPENAI_COMPAT_CONFIG[provider];
+  const apiKey = process.env[envKey];
+  if (!apiKey) throw new Error(`${envKey} is not set in environment`);
+
+  const client = new OpenAI({ apiKey, baseURL });
+
+  const res = await client.chat.completions.create({
+    model,
+    max_tokens: maxTokens,
+    temperature: options.isJson ? 0.2 : 0.4,
+    messages: [
+      { role: 'system', content: system },
+      { role: 'user',   content: user   },
+    ],
+    ...(options.isJson ? { response_format: { type: 'json_object' } } : {}),
+  });
+
+  return res.choices[0].message.content;
 }
 
 module.exports = { createAIClient, SUPPORTED_MODELS, getProvider };

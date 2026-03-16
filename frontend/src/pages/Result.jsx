@@ -133,6 +133,16 @@ export default function Result() {
               {modelParam.startsWith('gemini') ? '⚡' : '✦'} {modelParam}
             </span>
           )}
+          {job?.fromCache && (
+            <span style={{
+              ...s.fwBadge,
+              color: '#1ef5a0',
+              background: 'rgba(30,245,160,0.07)',
+              borderColor: 'rgba(30,245,160,0.22)',
+            }}>
+              ⚡ cached
+            </span>
+          )}
         </div>
 
         {isDone && (

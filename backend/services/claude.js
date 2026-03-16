@@ -22,7 +22,14 @@ async function generateRedesign(siteData, framework = 'react', onProgress = () =
   onProgress(4, 'Assembling project boilerplate…');
   const boilerplate = buildBoilerplate(tokens, siteData, framework, pages);
 
-  return { tokens, files: { ...boilerplate, ...components, ...pages } };
+  // Post-process: lift all <style>{`...`}</style> blocks out of JSX → global.css
+  // This eliminates the entire class of "Missing semicolon" / "Expected ;" Babel errors
+  // caused by CSS template literals in JSX files.
+  let files = { ...boilerplate, ...components, ...pages };
+  files = extractInlineCssToGlobal(files);
+  files = sanitizeTokensCss(files);
+
+  return { tokens, files };
 }
 
 // ─── Step 1: Design Tokens ────────────────────────────────────────────────────
@@ -73,7 +80,7 @@ Return ONLY this JSON (no markdown, no backticks):
   "boxShadowCard": "0 1px 4px rgba(0,0,0,0.06), 0 4px 24px rgba(0,0,0,0.08)",
   "transitionSpeed": "200ms",
   "navLinks": [{"text": "...", "path": "/..."}],
-  "pages": ["Home", "About"], "components": ["Features","Testimonials","CTA","Stats","Pricing"],
+  "pages": ["Home"], "components": ["Features","Testimonials","CTA","Stats","Pricing"],
   "darkMode": false
 }`;
 
@@ -103,27 +110,11 @@ async function generateComponents(tokens, siteData, framework, ai, onLog = () =>
   const siteCtx  = buildSiteContext(siteData);
   const navJson  = JSON.stringify(tokens.navLinks || []);
 
+  // NOTE: tokens.css is NOT AI-generated — it is built deterministically from extracted tokens
+  // in buildBoilerplate(). Generating it via AI caused smaller models (Llama etc.) to output
+  // JSX instead of CSS, corrupting the file.
+
   const coreComponents = [
-    {
-      name: 'tokens.css', dir: 'src/styles',
-      prompt: `Generate ONLY the CSS file src/styles/tokens.css for "${tokens.brandName}".
-Declare CSS custom properties under :root for every design token:
-${tokenCtx}
-
-Include ALL of these variables:
---primary, --secondary, --accent, --bg, --bg-secondary, --text, --text-muted, --border,
---font-heading, --font-body, --font-mono, --font-base,
---radius, --radius-lg, --radius-full,
---spacing, --spacing-sm, --spacing-lg, --spacing-xl,
---shadow, --shadow-lg, --shadow-xl,
---container, --transition, --transition-slow,
---gradient (linear-gradient combining --primary and --secondary),
---gradient-accent (linear-gradient combining --primary and --accent),
---primary-rgb (RGB values of primaryColor for rgba() usage),
---accent-rgb (RGB values of accentColor for rgba() usage)
-
-Return ONLY raw CSS. No JSON, no markdown, no explanation.`,
-    },
     {
       name: `Header.${ext}`, dir: compDir,
       prompt: `Generate ONLY a complete, production-quality ${isReact ? 'React JSX' : 'Angular TS'} Header component for "${tokens.brandName}" (${tokens.siteType}).
@@ -522,7 +513,8 @@ async function generatePages(tokens, components, siteData, framework, ai, onLog 
   const tokenCtx = buildTokenContext(tokens);
   const siteCtx  = buildSiteContext(siteData);
 
-  const pageNames = (tokens.pages || ['Home']).slice(0, 3);
+  // Single high-quality Home page — full token budget focused on one page
+  const pageNames = ['Home'];
   const files = {};
 
   for (const rawPageName of pageNames) {
@@ -537,19 +529,27 @@ async function generatePages(tokens, components, siteData, framework, ai, onLog 
       .map(c => `import ${c} from '../components/${c}';`)
       .join('\n');
 
-    const prompt = `Generate ONLY a complete, production-quality ${isReact ? 'React JSX' : 'Angular TS'} ${displayName} page for "${tokens.brandName}" (${tokens.siteType}).
+    const prompt = `Generate a COMPLETE, STUNNING, production-quality ${isReact ? 'React JSX' : 'Angular TS'} Home page for "${tokens.brandName}" (${tokens.siteType}).
+This is the ENTIRE website in one page — a rich, full-length landing page that showcases everything.
 
 ${tokenCtx}
 ${siteCtx}
 
-AVAILABLE COMPONENTS (import from '../components/X'):
+AVAILABLE COMPONENTS (import ALL relevant ones from '../components/X'):
 ${compNames.join(', ')}
 
-PAGE STRUCTURE for "${displayName}":
+MANDATORY PAGE STRUCTURE — include EVERY section in this exact order:
 ${buildPageStructure(pageName, compNames, tokens)}
 
+DESIGN MISSION — this page must feel PREMIUM and UNIQUE:
+- Vary section backgrounds: alternate between var(--bg), var(--bg-secondary), and subtle gradient/pattern backgrounds
+- Add page-level micro-animations via CSS keyframes (fade-up on load, subtle float effects)
+- Use the brand's visual style (${tokens.visualStyle}) to guide section aesthetics
+- Each section should feel visually distinct — don't make them all look the same
+- Use large, bold typography for section headings to create visual hierarchy
+
 CRITICAL STYLING RULES:
-- Use <style>{\`...\`}</style> CSS tag with "${toKebabCase(pageName)}-" prefixed class names for any page-specific styles
+- Use <style>{\`...\`}</style> CSS tag with "home-" prefixed class names for ALL page-specific styles
 - Import and USE the Layout component to wrap all content
 - Use CSS variables throughout: var(--primary), var(--accent), var(--bg), etc.
 
@@ -561,8 +561,8 @@ ${isReact ? `\nexport default function ${pageName}() { ... }` : ''}
 
 CONTENT RULES:
 - Use REAL content: brand="${tokens.brandName}", title="${siteData.title}", desc="${siteData.description || ''}"
-- Import and use the pre-built components (Hero, Features, Testimonials, CTA, etc.)
-- Add page-specific sections with inline <section> elements if needed
+- Import and USE every available component — do not skip any
+- Pass realistic brand-appropriate props to each component where supported
 - NO placeholder text like "Lorem ipsum" — write real, contextual content
 
 Return ONLY the complete raw ${ext.toUpperCase()} file starting with import statements. No markdown fences.`;
@@ -715,7 +715,7 @@ JSX TAG RULES — follow exactly or the component will crash:
   // Pass 1: generate at full token budget
   let content = await withRetry(async () => {
     const raw = (await ai.complete(system, prompt, ai.modelMax)).trim();
-    return raw.replace(/^```[\w]*\n?/, '').replace(/\n?```\s*$/g, '').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').replace(/<ctrl\d+>/g, '').trim();
+    return extractFirstCodeBlock(raw).replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').replace(/<ctrl\d+>/g, '').trim();
   }, ai, onLog, 'generate');
 
   // Pass 2: continue ONLY if the output appears truncated
@@ -730,7 +730,7 @@ ${content.slice(-1000)}`;
 
     const continuation = await withRetry(async () => {
       const raw = (await ai.complete(system, continuePrompt, ai.modelMax)).trim();
-      return raw.replace(/^```[\w]*\n?/, '').replace(/\n?```\s*$/g, '').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').replace(/<ctrl\d+>/g, '').trim();
+      return extractFirstCodeBlock(raw).replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').replace(/<ctrl\d+>/g, '').trim();
     }, ai, onLog, 'continue').catch(() => '');
 
     if (continuation) content = content + '\n' + continuation;
@@ -806,6 +806,25 @@ function fixJsxTagBalance(code) {
 // `var` is a JS keyword — {var(...)} is not a valid expression.
 // Fix: convert  ={cssFunc(...)}  →  ="cssFunc(...)"  (string prop)
 // Covers: var(), rgba(), rgb(), hsl(), hsla(), calc(), linear-gradient(), radial-gradient()
+
+/**
+ * Extract only the first code block from AI output.
+ * Models like Llama sometimes append extra ```css blocks after the JSX — discard them.
+ */
+function extractFirstCodeBlock(raw) {
+  const trimmed = raw.trim();
+  // Case 1: well-formed fenced block — ```lang\n...content...\n```
+  const fenceMatch = trimmed.match(/^```[\w]*\n?([\s\S]*?)```/);
+  if (fenceMatch) return fenceMatch[1].trim();
+  // Case 2: opening fence present but no closing fence (truncated AI response)
+  // Strip JUST the first line if it's a fence marker so it doesn't corrupt the file
+  if (/^```/.test(trimmed)) {
+    const withoutOpenFence = trimmed.replace(/^```[\w]*\n?/, '');
+    return withoutOpenFence.replace(/\n?```\s*$/, '').trim();
+  }
+  // Case 3: no fences at all — strip any stray trailing fence and return
+  return trimmed.replace(/\n?```\s*$/, '').trim();
+}
 
 function fixCssVarProps(code) {
   const CSS_FUNCS = 'var|rgba?|hsla?|calc|linear-gradient|radial-gradient|conic-gradient|clamp|min|max';
@@ -998,7 +1017,7 @@ ${code}`;
       // Use a fast, smaller token budget for repair — it just needs to fix structure
       const budget = Math.min(ai.modelMax, 32000);
       const raw = (await ai.complete(repairSystem, repairPrompt, budget)).trim();
-      return raw.replace(/^```[\w]*\n?/, '').replace(/\n?```\s*$/g, '').trim();
+      return extractFirstCodeBlock(raw).trim();
     }, ai, onLog, 'repair');
 
     if (repaired && repaired.length > 200 && /export\s+default/.test(repaired)) {
@@ -1279,6 +1298,100 @@ function hexToRGB(hex) {
   const b = parseInt(full.slice(4, 6), 16);
   if (isNaN(r) || isNaN(g) || isNaN(b)) return '99, 102, 241';
   return `${r}, ${g}, ${b}`;
+}
+
+// ─── Post-processor: extract <style>{`...`}</style> from JSX → global.css ────
+//
+// The #1 source of "Missing semicolon" / "Expected ;" Babel/esbuild errors is CSS
+// template literals inside JSX <style> tags. esbuild's dependency scanner and some
+// Babel configs misparse them. The fix: lift ALL component CSS out of JSX files and
+// append it to global.css, which is a plain CSS file that never gets JSX-parsed.
+//
+// Before: Footer.jsx has  <style>{` .ftr-container { ... } `}</style>
+// After:  Footer.jsx has nothing; global.css has  .ftr-container { ... }
+//
+function extractInlineCssToGlobal(files) {
+  const extractedCss = [];
+  const updatedFiles = { ...files };
+
+  for (const [filePath, content] of Object.entries(files)) {
+    if (!filePath.endsWith('.jsx') && !filePath.endsWith('.tsx')) continue;
+    if (!content.includes('<style>')) continue;
+
+    const lines   = content.split('\n');
+    const newLines = [];
+    let insideStyle = false;
+    let cssLines    = [];
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+
+      if (!insideStyle && /<style>\{\`/.test(line)) {
+        // Same-line open+close: <style>{` .foo { ... } `}</style>
+        const sameLineMatch = line.match(/<style>\{\`([\s\S]*?)\`\}<\/style>/);
+        if (sameLineMatch) {
+          if (sameLineMatch[1].trim()) extractedCss.push(sameLineMatch[1]);
+          // Remove the style tag from this line; keep anything else on the line
+          const rest = line.replace(/<style>\{`[\s\S]*?`\}<\/style>/, '').trim();
+          if (rest) newLines.push(rest);
+        } else {
+          // Multi-line: capture CSS after the opening backtick
+          const afterOpen = line.replace(/.*<style>\{\`/, '');
+          if (afterOpen.trim()) cssLines.push(afterOpen);
+          insideStyle = true;
+          // Don't push this line to newLines (the <style> tag is being removed)
+        }
+      } else if (insideStyle) {
+        if (/`\}<\/style>/.test(line)) {
+          // Closing line: capture CSS before the closing backtick
+          const beforeClose = line.replace(/`\}<\/style>.*/, '');
+          if (beforeClose.trim()) cssLines.push(beforeClose);
+          extractedCss.push(cssLines.join('\n'));
+          cssLines    = [];
+          insideStyle = false;
+          // Don't push this line to newLines (closing </style> is removed)
+        } else {
+          cssLines.push(line);
+        }
+      } else {
+        newLines.push(line);
+      }
+    }
+
+    // Only update if we actually removed something
+    if (newLines.length !== lines.length) {
+      updatedFiles[filePath] = newLines.join('\n');
+      console.log(`[extractInlineCssToGlobal] Lifted styles out of ${filePath}`);
+    }
+  }
+
+  if (extractedCss.length > 0) {
+    const block = '\n\n/* ─── Component styles (auto-extracted from JSX) ─── */\n'
+                + extractedCss.join('\n\n');
+    updatedFiles['src/styles/global.css'] = (updatedFiles['src/styles/global.css'] || '') + block;
+    console.log(`[extractInlineCssToGlobal] Appended CSS from ${extractedCss.length} component(s) to global.css`);
+  }
+
+  return updatedFiles;
+}
+
+// ─── Post-processor: ensure tokens.css is pure CSS ───────────────────────────
+// Smaller models (Llama 3.1 8B, DeepSeek V3) sometimes generate a JSX component
+// as their response to the tokenize prompt instead of valid JSON. When the JSON
+// parser salvages partial data the CSS file can end up with JS content if an older
+// code-path wrote it. Strip any JS wrapper and keep only the :root { … } block.
+function sanitizeTokensCss(files) {
+  const key = 'src/styles/tokens.css';
+  if (!files[key]) return files;
+  const css = files[key];
+  if (/export\s+default|import\s+[\w{]|function\s+\w+\s*\(/.test(css)) {
+    console.warn('[sanitizeTokensCss] tokens.css contains JavaScript — stripping to :root block only');
+    const rootMatch = css.match(/:root\s*\{[\s\S]*?\}/);
+    if (rootMatch) return { ...files, [key]: rootMatch[0] };
+    // If we can't find :root, fall back to the global.css (tokens will be missing but app won't crash)
+    console.warn('[sanitizeTokensCss] Could not extract :root block — leaving tokens.css as-is');
+  }
+  return files;
 }
 
 module.exports = { generateRedesign };

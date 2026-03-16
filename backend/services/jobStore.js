@@ -5,6 +5,15 @@ const JOBS_FILE = path.join(__dirname, '../../storage/jobs.json');
 const jobs = new Map();
 const sseClients = new Map();
 
+// URL → jobId index for cache hit lookup (most recent completed job per URL)
+const urlCache = new Map();
+
+function normalizeUrl(url = '') {
+  return url.trim().toLowerCase()
+    .replace(/^https?:\/\/(www\.)?/, '')
+    .replace(/\/$/, '');
+}
+
 // Load jobs from disk on startup
 if (fs.existsSync(JOBS_FILE)) {
   try {
@@ -16,7 +25,16 @@ if (fs.existsSync(JOBS_FILE)) {
         job.error = 'Process was interrupted or timed out.';
       }
       jobs.set(id, job);
+      // Re-populate URL cache from persisted jobs
+      if (job.status === 'done' && job.url) {
+        const key = normalizeUrl(job.url);
+        const existing = urlCache.get(key);
+        if (!existing || job.createdAt > (jobs.get(existing)?.createdAt || 0)) {
+          urlCache.set(key, id);
+        }
+      }
     });
+    console.log(`[jobStore] Loaded ${jobs.size} jobs, ${urlCache.size} cached URLs`);
   } catch (err) {
     console.error('Failed to load jobs.json:', err.message);
   }
@@ -154,4 +172,31 @@ function listJobs() {
   return Array.from(jobs.values()).sort((a, b) => b.createdAt - a.createdAt);
 }
 
-module.exports = { createJob, updateJob, getJob, addLog, addSSEClient, removeSSEClient, listJobs, loadFilesFromDisk };
+/**
+ * Register a completed job in the URL cache.
+ * Called by the pipeline when status → 'done'.
+ */
+function registerUrlCache(url, jobId) {
+  if (!url) return;
+  urlCache.set(normalizeUrl(url), jobId);
+}
+
+/**
+ * Look up the most recent completed job for a given URL.
+ * Returns the jobId string if found, null otherwise.
+ */
+function findCachedJob(url) {
+  if (!url) return null;
+  const jobId = urlCache.get(normalizeUrl(url));
+  if (!jobId) return null;
+  const job = jobs.get(jobId);
+  if (!job || job.status !== 'done') return null;
+  return jobId;
+}
+
+module.exports = {
+  createJob, updateJob, getJob, addLog,
+  addSSEClient, removeSSEClient,
+  listJobs, loadFilesFromDisk,
+  findCachedJob, registerUrlCache,
+};
