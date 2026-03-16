@@ -1,0 +1,58 @@
+:root {
+  /* Brand colors */
+  --primary:      {{PRIMARY_COLOR}};
+  --secondary:    {{SECONDARY_COLOR}};
+  --accent:       {{ACCENT_COLOR}};
+
+  /* Backgrounds */
+  --bg:           {{BG_COLOR}};
+  --bg-secondary: {{BG_SECONDARY}};
+
+  /* Text */
+  --text:         {{TEXT_COLOR}};
+  --text-muted:   {{TEXT_MUTED}};
+
+  /* Borders */
+  --border:       {{BORDER_COLOR}};
+
+  /* Typography */
+  --font-heading: {{FONT_HEADING}};
+  --font-body:    {{FONT_BODY}};
+  --font-mono:    {{FONT_MONO}};
+  --font-base:    {{FONT_BASE}};
+
+  /* Shape */
+  --radius:       {{BORDER_RADIUS}};
+  --radius-lg:    {{BORDER_RADIUS_LG}};
+  --radius-full:  9999px;
+
+  /* Spacing */
+  --spacing:      {{SPACING}};
+  --spacing-sm:   calc({{SPACING}} / 2);
+  --spacing-lg:   calc({{SPACING}} * 2);
+  --spacing-xl:   calc({{SPACING}} * 4);
+
+  /* Shadows */
+  --shadow:       {{BOX_SHADOW}};
+  --shadow-lg:    0 8px 40px rgba(0,0,0,0.14);
+  --shadow-xl:    0 20px 60px rgba(0,0,0,0.18);
+
+  /* Layout */
+  --container:    1200px;
+
+  /* Transitions */
+  --transition:       0.2s ease;
+  --transition-slow:  0.4s ease;
+
+  /* Gradients */
+  --gradient:         linear-gradient(135deg, {{GRADIENT_START}}, {{GRADIENT_END}});
+  --gradient-accent:  linear-gradient(135deg, {{PRIMARY_COLOR}}, {{ACCENT_COLOR}});
+  --gradient-subtle:  linear-gradient(135deg, {{BG_COLOR}}, {{BG_SECONDARY}});
+
+  /* RGB values for rgba() usage — used by Header backdrop-filter, glow effects, etc. */
+  --primary-rgb:   {{PRIMARY_RGB}};
+  --accent-rgb:    {{ACCENT_RGB}};
+  --bg-rgb:        {{BG_RGB}};
+  --secondary-rgb: {{SECONDARY_RGB}};
+  --border-rgb:    {{BORDER_RGB}};
+}

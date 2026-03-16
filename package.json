@@ -1,0 +1,14 @@
+{
+  "name": "websight",
+  "version": "1.0.0",
+  "description": "AI Website Redesigner - monorepo root",
+  "scripts": {
+    "backend": "cd backend && npm run dev",
+    "frontend": "cd frontend && npm run dev",
+    "install:all": "cd backend && npm install && cd ../frontend && npm install",
+    "dev": "concurrently \"npm run backend\" \"npm run frontend\" --names \"backend,frontend\" --prefix-colors \"cyan,magenta\""
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

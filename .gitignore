@@ -1,0 +1,95 @@
+# ===========================
+# Dependencies
+# ===========================
+node_modules/
+.pnp
+.pnp.js
+
+# ===========================
+# Environment Variables
+# ===========================
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+# Keep .env.example (template for others)
+!.env.example
+
+# ===========================
+# Build Outputs
+# ===========================
+dist/
+build/
+out/
+.output/
+.nuxt/
+.next/
+
+# ===========================
+# Logs
+# ===========================
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ===========================
+# Runtime / Cache
+# ===========================
+.cache/
+.parcel-cache/
+.vite/
+*.tsbuildinfo
+
+# ===========================
+# Testing
+# ===========================
+coverage/
+*.lcov
+.nyc_output/
+
+# ===========================
+# OS Files
+# ===========================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ===========================
+# Editor / IDE
+# ===========================
+.vscode/
+.idea/
+*.swp
+*.swo
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# ===========================
+# Backend Specific
+# ===========================
+backend/out.json
+backend/test*.js
+
+# ===========================
+# Storage / Generated Files
+# ===========================
+storage/
+
+# ===========================
+# Misc
+# ===========================
+*.pem
+.yarn-integrity
