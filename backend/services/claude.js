@@ -832,6 +832,10 @@ async function generateSingleFile(prompt, framework, ai, onLog = () => {}) {
 - Subtle backgrounds: use radial-gradient or mesh patterns instead of flat solid colors
 - Icons: use Unicode symbols or inline SVG — NEVER emoji icons in production UI
 
+═══ CSS VARIABLE NAMES — use ONLY these exact names ═══
+var(--primary) var(--secondary) var(--accent) | var(--bg) var(--bg-secondary) var(--bg-alt) | var(--text) var(--text-muted) var(--muted) | var(--border) | var(--shadow) var(--shadow-lg) var(--shadow-xl) | var(--radius) var(--radius-lg) var(--radius-full) var(--radius-pill) | var(--spacing) var(--spacing-sm) var(--spacing-lg) var(--spacing-xl) | var(--gradient) var(--gradient-accent) var(--gradient-subtle) | var(--transition) var(--transition-slow) | var(--font-heading) var(--font-body) var(--container)
+For spacing values use: 8px, 16px, 24px, 32px, 48px, 64px, 80px, 96px directly — NEVER invent --spacing-unit, --spacing-2, --pill, --transition-ease or any other custom variable not in this list.
+
 ═══ ANTI-PATTERNS (never do these) ═══
 - No gray-on-gray text (ensure ≥4.5:1 contrast on all text)
 - No color-only meaning (always pair color with text/icon/shape)
@@ -1315,7 +1319,22 @@ Body: ${tokens.fontBody} (weight ${tokens.fontWeightBody || '400'}, line-height 
 
 SPACING & SHAPE:
 Radius: ${tokens.borderRadius} | Radius-lg: ${tokens.borderRadiusLg || '16px'} | Pill: ${tokens.borderRadiusFull || '9999px'}
-Base spacing: ${tokens.spacing}`;
+Base spacing: ${tokens.spacing}
+
+⚠️ CSS VARIABLE RULE — CRITICAL:
+Use ONLY these exact CSS variable names. NEVER invent new ones (e.g. --spacing-unit, --pill, --transition-ease are NOT valid):
+Colors:    var(--primary)  var(--secondary)  var(--accent)
+BG:        var(--bg)  var(--bg-secondary)  var(--bg-alt)
+Text:      var(--text)  var(--text-muted)  var(--muted)
+Border:    var(--border)
+Spacing:   var(--spacing)  var(--spacing-sm)  var(--spacing-lg)  var(--spacing-xl)
+Shape:     var(--radius)  var(--radius-lg)  var(--radius-full)  var(--radius-pill)
+Shadow:    var(--shadow)  var(--shadow-lg)  var(--shadow-xl)
+Gradient:  var(--gradient)  var(--gradient-accent)  var(--gradient-subtle)
+Motion:    var(--transition)  var(--transition-slow)
+Font:      var(--font-heading)  var(--font-body)  var(--font-mono)
+RGB:       var(--primary-rgb)  var(--accent-rgb)  var(--bg-rgb)  var(--border-rgb)
+For raw spacing values use: 8px, 16px, 24px, 32px, 48px, 64px, 80px, 96px (NOT calc(n * var(--spacing-unit)))`;
 }
 
 function buildSiteContext(siteData) {
@@ -1583,15 +1602,56 @@ function extractInlineCssToGlobal(files) {
 function sanitizeTokensCss(files) {
   const key = 'src/styles/tokens.css';
   if (!files[key]) return files;
-  const css = files[key];
+  let css = files[key];
+
+  // Strip JS if AI corrupted the file
   if (/export\s+default|import\s+[\w{]|function\s+\w+\s*\(/.test(css)) {
     console.warn('[sanitizeTokensCss] tokens.css contains JavaScript — stripping to :root block only');
     const rootMatch = css.match(/:root\s*\{[\s\S]*?\}/);
-    if (rootMatch) return { ...files, [key]: rootMatch[0] };
-    // If we can't find :root, fall back to the global.css (tokens will be missing but app won't crash)
-    console.warn('[sanitizeTokensCss] Could not extract :root block — leaving tokens.css as-is');
+    if (rootMatch) css = rootMatch[0];
+    else {
+      console.warn('[sanitizeTokensCss] Could not extract :root block — leaving tokens.css as-is');
+      return files;
+    }
   }
-  return files;
+
+  // Inject aliases for common variables the AI invents but are not in the standard token set.
+  // This is a safety net — the real fix is the CSS variable rule in prompts.
+  const aliasBlock = `
+/* ─── Auto-injected aliases for AI-invented variable names ─── */
+  --spacing-unit:          8px;
+  --spacing-xs:            0.5rem;
+  --spacing-2:             1rem;
+  --spacing-3:             1.5rem;
+  --spacing-4:             2rem;
+  --spacing-md:            1rem;
+  --spacing-xxl:           5rem;
+  --spacing-xxxl:          7rem;
+  --pill:                  9999px;
+  --pill-radius:           9999px;
+  --transition-speed:      0.2s;
+  --transition-ease:       cubic-bezier(0.4,0,0.2,1);
+  --font-size-base:        16px;
+  --letter-spacing-heading: -0.02em;
+  --line-height-body:      1.65;
+  --card:                  var(--bg-secondary);
+  --card-bg:               var(--bg-secondary);
+  --card-shadow:           var(--shadow);
+  --card-shadow-featured:  var(--shadow-lg);
+  --ftr-bg:                #0d0d0d;
+  --ftr-border:            rgba(255,255,255,0.1);
+  --ftr-link-hover:        #ffffff;
+  --ftr-radius:            var(--radius);
+  --ftr-shadow:            var(--shadow-lg);
+  --ftr-social-bg:         rgba(255,255,255,0.06);
+  --ftr-text-light:        rgba(255,255,255,0.9);
+  --ftr-text-muted:        rgba(255,255,255,0.5);
+  --ftr-transition:        var(--transition);`;
+
+  // Insert aliases before the closing } of :root
+  css = css.replace(/(\s*)\}(\s*)$/, `${aliasBlock}\n}$2`);
+
+  return { ...files, [key]: css };
 }
 
 module.exports = { generateRedesign };
