@@ -877,7 +877,9 @@ JSX TAG RULES — follow exactly or the component will crash:
   // Pass 1: generate at full token budget
   let content = await withRetry(async () => {
     const raw = (await ai.complete(system, prompt, ai.modelMax)).trim();
-    return extractFirstCodeBlock(raw).replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').replace(/<ctrl\d+>/g, '').trim();
+    const code = extractFirstCodeBlock(raw).replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').replace(/<ctrl\d+>/g, '').trim();
+    // Return empty string here — withRetry will detect it and retry
+    return code;
   }, ai, onLog, 'generate');
 
   // Pass 2: continue ONLY if the output appears truncated
@@ -1219,13 +1221,29 @@ function isTruncated(code) {
 async function withRetry(fn, ai, onLog, label = 'call', retries = 3) {
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
-      return await fn();
+      const result = await fn();
+      // Treat empty response as a retryable failure
+      if (result === null || result === undefined || result === '') {
+        if (attempt < retries) {
+          const delay = 3000 * attempt;
+          onLog(`Empty response on ${label} — retrying (${attempt}/${retries})…`);
+          await new Promise(r => setTimeout(r, delay));
+          continue;
+        }
+        throw new Error(`Empty response after ${retries} attempts`);
+      }
+      return result;
     } catch (err) {
-      const is429 = err.message && (err.message.includes('429') || err.message.includes('Quota') || err.message.includes('RESOURCE_EXHAUSTED'));
-      if (is429 && attempt < retries) {
-        const delay = attempt * 25000;
-        onLog(`Rate limit hit on ${label} — pausing ${delay / 1000}s…`);
-        console.warn(`[ai] 429 on ${label}, attempt ${attempt}/${retries}, waiting ${delay}ms`);
+      const msg = err.message || '';
+      const is429       = msg.includes('429') || msg.includes('Quota') || msg.includes('RESOURCE_EXHAUSTED');
+      const isTransient = msg.includes('500') || msg.includes('502') || msg.includes('503')
+                       || msg.includes('UNAVAILABLE') || msg.includes('network') || msg.includes('ECONNRESET')
+                       || msg.includes('timeout') || msg.includes('socket');
+
+      if ((is429 || isTransient) && attempt < retries) {
+        const delay = is429 ? attempt * 25000 : attempt * 4000;
+        onLog(`${is429 ? 'Rate limit' : 'Transient error'} on ${label} — retrying in ${delay / 1000}s… (${attempt}/${retries})`);
+        console.warn(`[ai] ${is429 ? '429' : 'transient'} on ${label}, attempt ${attempt}/${retries}, waiting ${delay}ms: ${msg}`);
         await new Promise(r => setTimeout(r, delay));
       } else {
         throw err;
