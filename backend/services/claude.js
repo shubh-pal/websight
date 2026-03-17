@@ -9,17 +9,21 @@ const { createAIClient } = require('./aiClient');
 async function generateRedesign(siteData, framework = 'react', onProgress = () => {}, model = 'claude-opus-4-5') {
   const ai = createAIClient(model);
 
-  onProgress(1, `Analyzing site structure… [${model}]`);
+  onProgress(1, `Analyzing brand identity… [${model}]`);
   const tokens = await analyzeAndTokenize(siteData, ai, (msg) => onProgress(1, msg));
-  onProgress(1, `Design tokens extracted — ${tokens.brandName} (${tokens.siteType})`);
+  onProgress(1, `Brand analyzed — ${tokens.brandName} · ${tokens.styleArchetype || tokens.siteType} · ${tokens.brandPersonality || ''}`);
 
-  onProgress(2, 'Generating shared components…');
-  const components = await generateComponents(tokens, siteData, framework, ai, (msg) => onProgress(2, msg));
+  onProgress(2, 'Creating layout strategy…');
+  const layout = await generateLayoutStrategy(tokens, siteData, ai, (msg) => onProgress(2, msg));
+  onProgress(2, `Layout — ${layout.sectionOrder.join(' → ')} | ${layout.designNotes || 'custom composition'}`);
 
-  onProgress(3, 'Generating pages…');
-  const pages = await generatePages(tokens, components, siteData, framework, ai, (msg) => onProgress(3, msg));
+  onProgress(3, 'Generating shared components…');
+  const components = await generateComponents(tokens, layout, siteData, framework, ai, (msg) => onProgress(3, msg));
 
-  onProgress(4, 'Assembling project boilerplate…');
+  onProgress(4, 'Generating pages…');
+  const pages = await generatePages(tokens, layout, components, siteData, framework, ai, (msg) => onProgress(4, msg));
+
+  onProgress(5, 'Assembling project boilerplate…');
   const boilerplate = buildBoilerplate(tokens, siteData, framework, pages);
 
   // Post-process: lift all <style>{`...`}</style> blocks out of JSX → global.css
@@ -35,8 +39,11 @@ async function generateRedesign(siteData, framework = 'react', onProgress = () =
 // ─── Step 1: Design Tokens ────────────────────────────────────────────────────
 
 async function analyzeAndTokenize(siteData, ai, onLog = () => {}) {
-  const system = 'You are a senior design system architect and UI/UX expert. Analyze website data and return ONLY valid JSON — no markdown, no backticks, no explanation.';
-  const user = `Analyze this website and return a PREMIUM design system. Apply expert-level design intelligence.
+  const system = `You are a world-class brand strategist, product designer, and design system architect.
+You do NOT just extract styles — you interpret brand identity and elevate it to premium quality.
+Return ONLY valid JSON. No markdown. No explanation. Every field must be filled.`;
+
+  const user = `Deeply analyze this website and generate a comprehensive brand system + creative direction.
 
 URL: ${siteData.url}
 Title: ${siteData.title}
@@ -49,28 +56,111 @@ Page Sections: ${JSON.stringify((siteData.sections || []).slice(0, 8))}
 Headings: ${JSON.stringify((siteData.headings || []).slice(0, 10))}
 HTML Excerpt: ${(siteData.bodyHTML || '').slice(0, 4000)}
 
-DESIGN INTELLIGENCE RULES:
-1. COLORS: Primary + accent must have ≥4.5:1 contrast on their backgrounds (WCAG AA). Choose colors that feel intentional and brand-appropriate — not generic purple/blue defaults unless the site actually uses them.
-2. STYLE: Classify the visual style accurately. Modern SaaS → clean white space, sharp typography, subtle shadows. Dark/tech → near-black bg, vibrant accent, glow effects. Agency/creative → bold typography, expressive gradients. E-commerce → high contrast, trust-building neutral palette.
-3. FONTS: Match font personality to brand — don't default to Inter for everything. Editorial sites → serif heading. Tech → geometric sans. Creative → display or variable font. Pick REAL Google Fonts that suit the brand.
-4. SHADOWS: Calibrate depth to the style. Minimal → no shadow. Cards → soft diffuse. Elevated elements → multi-layer shadow.
-5. RADIUS: Pill/rounded for SaaS/consumer, sharp for enterprise/editorial, medium for general.
-6. ANIMATION: Pick animationMood that fits — "subtle" for corporate/finance, "playful" for consumer apps, "dynamic" for creative/agency, "none" for ultra-minimal.
+YOUR TASKS:
 
-Return ONLY this JSON (no markdown, no backticks):
+1. BRAND INTELLIGENCE
+Infer:
+- brandPersonality: one of [bold, playful, corporate, futuristic, minimal, authoritative, warm, innovative]
+- targetAudience: concise description (e.g. "enterprise legal teams", "indie developers", "fashion-forward millennials")
+- pricePositioning: budget | mid | premium | luxury
+- visualMaturity: basic | decent | strong | elite
+
+2. STYLE ARCHETYPE (critical — drives all visual variation)
+Choose ONE styleArchetype that BEST fits the brand:
+- "glassmorphism" — frosted glass panels, luminous accents, gradient backgrounds
+- "brutalism" — raw borders, bold type, high contrast, intentional roughness
+- "neo-banking" — ultra-clean, trust-first, data-rich, precise grid, no-fluff
+- "editorial-luxury" — strong typographic hierarchy, generous whitespace, serif accents, restrained palette
+- "playful-startup" — rounded everything, bright accent colors, friendly tone, organic shapes
+- "tech-futuristic" — dark mode first, grid overlays, neon accents, terminal-inspired
+- "minimal-swiss" — grid-based, whitespace as design element, muted palette, typographic focus
+- "gradient-saas" — vibrant gradients, feature-rich layouts, conversion-optimized
+Also choose secondaryStyle (optional blend) from same list.
+
+3. COLOR SYSTEM (WCAG AA — primary/text must have ≥4.5:1 contrast on bg)
+- primaryColor, secondaryColor, accentColor (hex)
+- bgColor, bgSecondary, bgCard
+- textColor, textMuted, textSubtle, borderColor
+- gradientStart, gradientEnd, gradientAngle
+- heroOverlay (rgba for dark overlays)
+- successColor, warningColor
+Choose colors that feel brand-authentic. NO generic purple/indigo unless brand actually uses it.
+
+4. TYPOGRAPHY
+- fontHeading: a Google Font that matches brand personality (editorial → serif, tech → geometric, creative → display)
+- fontBody: readable Google Font (can be same as heading)
+- fontMono: "JetBrains Mono"
+- fontWeightHeading, fontWeightBody, baseFontSize, lineHeight, letterSpacingHeading
+
+5. SPATIAL SYSTEM
+- borderRadius (sharp=2px for enterprise/editorial, medium=8px general, round=16px+ for SaaS/consumer)
+- borderRadiusLg, borderRadiusFull: 9999px
+- spacing: base rem value (e.g. "1.5rem")
+- boxShadow, boxShadowLg, boxShadowCard
+
+6. MOTION SYSTEM
+- animationMood: subtle (corporate) | dynamic (agency/creative) | playful (consumer) | none (minimal)
+- transitionSpeed: e.g. "180ms"
+- transitionCurve: e.g. "cubic-bezier(0.4,0,0.2,1)"
+- scrollAnimation: "fade-up" | "slide-in" | "scale-in" | "none"
+
+7. COMPONENT STRATEGY (drives layout variation — NO generic defaults)
+For each component, choose layout type and visual approach appropriate for this SPECIFIC brand:
 {
-  "brandName": "...", "tagline": "...",
-  "siteType": "e-commerce|portfolio|blog|saas|corporate|agency|news|other",
-  "visualStyle": "modern-saas|dark-tech|editorial|glassmorphism|brutalist|minimal|creative|enterprise",
-  "animationMood": "subtle|dynamic|playful|none",
-  "density": "compact|comfortable|spacious",
-  "primaryColor": "#hex", "secondaryColor": "#hex", "accentColor": "#hex",
-  "successColor": "#hex", "warningColor": "#hex",
-  "bgColor": "#hex", "bgSecondary": "#hex", "bgCard": "#hex",
-  "textColor": "#hex", "textMuted": "#hex", "textSubtle": "#hex", "borderColor": "#hex",
-  "gradientStart": "#hex", "gradientEnd": "#hex", "gradientAngle": "135deg",
+  "hero": {
+    "layout": "centered|split-left|split-right|asymmetric|immersive|editorial",
+    "visual": "blobs|product-ui|illustration|abstract-grid|minimal|pattern",
+    "ctaStyle": "dual-button|single-cta|inline-form"
+  },
+  "features": {
+    "layout": "3-col-grid|bento-grid|alternating-rows|timeline|2-col-asymmetric",
+    "cardStyle": "bordered|elevated|flat|gradient-border"
+  },
+  "testimonials": {
+    "layout": "3-col|masonry|featured-center|single-large"
+  },
+  "stats": {
+    "layout": "4-col-dividers|2x2-grid|horizontal-banner",
+    "style": "minimal-numbers|icon-led|gradient-text|bordered-cells"
+  },
+  "cta": {
+    "layout": "centered-gradient|split-dark|full-bleed|minimal-border"
+  }
+}
+
+8. CONTENT STRATEGY
+- toneOfVoice: authoritative | friendly | bold | aspirational | technical | empathetic
+- headlineStyle: short-punchy | descriptive | bold-claim | question-led
+- ctaLanguage: example CTA text that fits this brand (e.g. "Request a Demo" vs "Start Building" vs "Get Early Access")
+- tagline: short, brand-authentic tagline
+
+9. NAVIGATION — MAX 5 links, relevant to actual brand
+- navLinks: [{text, path}]
+- pages: ["Home"]
+- components: ["Features","Testimonials","CTA","Stats"]
+
+10. CREATIVE DIRECTION (most important output — this is what prevents every site from looking the same)
+Generate a bold, opinionated creative direction unique to this brand. Do NOT be safe or generic.
+- designConcept: One strong sentence describing the core visual idea (e.g. "A high-contrast legal-tech interface that blends editorial seriousness with modern SaaS clarity")
+- visualMotif: A recurring visual element woven throughout (e.g. "diagonal rule lines", "glowing edge accents", "frosted glass panels", "paper grain texture", "neon dot grid")
+- layoutEnergy: calm | balanced | dynamic | experimental
+- density: airy | balanced | dense
+- uniquenessScore: low | medium | high | very-high (be honest — push for high/very-high)
+- doNotDo: Array of 3 specific things to AVOID for THIS brand (e.g. "no playful blob shapes", "no centered hero layout", "no bright gradient backgrounds")
+- mustHaveMoments: Array of 3 standout design moments this page MUST include (e.g. "asymmetric hero with large typographic statement", "dark immersive CTA section", "editorial section-break dividers")
+
+Return ONLY this JSON (no markdown, no backticks, all fields filled):
+{
+  "brandName": "", "tagline": "", "siteType": "corporate|saas|e-commerce|portfolio|agency|blog|other",
+  "brandPersonality": "", "targetAudience": "", "pricePositioning": "", "visualMaturity": "",
+  "styleArchetype": "", "secondaryStyle": "",
+  "primaryColor": "", "secondaryColor": "", "accentColor": "",
+  "successColor": "", "warningColor": "",
+  "bgColor": "", "bgSecondary": "", "bgCard": "",
+  "textColor": "", "textMuted": "", "textSubtle": "", "borderColor": "",
+  "gradientStart": "", "gradientEnd": "", "gradientAngle": "135deg",
   "heroOverlay": "rgba(0,0,0,0.45)",
-  "fontHeading": "Google Font name", "fontBody": "Google Font name", "fontMono": "JetBrains Mono",
+  "fontHeading": "", "fontBody": "", "fontMono": "JetBrains Mono",
   "fontWeightHeading": "700", "fontWeightBody": "400",
   "baseFontSize": "16px", "lineHeight": "1.65", "letterSpacingHeading": "-0.02em",
   "borderRadius": "8px", "borderRadiusLg": "16px", "borderRadiusFull": "9999px",
@@ -78,9 +168,27 @@ Return ONLY this JSON (no markdown, no backticks):
   "boxShadow": "0 2px 16px rgba(0,0,0,0.08)",
   "boxShadowLg": "0 8px 40px rgba(0,0,0,0.12)",
   "boxShadowCard": "0 1px 4px rgba(0,0,0,0.06), 0 4px 24px rgba(0,0,0,0.08)",
-  "transitionSpeed": "200ms",
-  "navLinks": [{"text": "...", "path": "/..."}],
-  "pages": ["Home"], "components": ["Features","Testimonials","CTA","Stats","Pricing"],
+  "animationMood": "subtle", "transitionSpeed": "200ms",
+  "transitionCurve": "cubic-bezier(0.4,0,0.2,1)", "scrollAnimation": "fade-up",
+  "componentStrategy": {
+    "hero": { "layout": "centered", "visual": "blobs", "ctaStyle": "dual-button" },
+    "features": { "layout": "3-col-grid", "cardStyle": "bordered" },
+    "testimonials": { "layout": "3-col" },
+    "stats": { "layout": "4-col-dividers", "style": "icon-led" },
+    "cta": { "layout": "centered-gradient" }
+  },
+  "toneOfVoice": "", "headlineStyle": "", "ctaLanguage": "",
+  "creativeDirection": {
+    "designConcept": "",
+    "visualMotif": "",
+    "layoutEnergy": "balanced",
+    "density": "balanced",
+    "uniquenessScore": "high",
+    "doNotDo": [],
+    "mustHaveMoments": []
+  },
+  "navLinks": [], "pages": ["Home"],
+  "components": ["Features","Testimonials","CTA","Stats"],
   "darkMode": false
 }`;
 
@@ -100,387 +208,424 @@ Return ONLY this JSON (no markdown, no backticks):
   }, ai, onLog, 'tokenize');
 }
 
+// ─── Step 1b: Layout Strategy ─────────────────────────────────────────────────
+// Determines unique section order + layout types per section for this brand.
+// This is what prevents every site from looking like the same SaaS template.
+
+async function generateLayoutStrategy(tokens, siteData, ai, onLog = () => {}) {
+  const system = `You are an award-winning creative director designing unique landing pages.
+Return ONLY valid JSON. No markdown. No explanation.`;
+
+  const archetype = tokens.styleArchetype || 'gradient-saas';
+  const strategy  = tokens.componentStrategy || {};
+  const comps     = (tokens.components || ['Features','Testimonials','CTA','Stats']);
+
+  const user = `Create a unique layout composition for "${tokens.brandName}" (${tokens.siteType}).
+
+Brand personality: ${tokens.brandPersonality}
+Style archetype: ${archetype}
+Target audience: ${tokens.targetAudience}
+Tone of voice: ${tokens.toneOfVoice}
+Component strategy: ${JSON.stringify(strategy)}
+Available sections: ${comps.join(', ')}
+
+DO NOT use a generic fixed order. Design a page flow that tells THIS brand's specific story.
+
+🔥 HARD RULES — these override everything else:
+1. This layout MUST NOT resemble a standard SaaS landing page template (Hero → Features → Pricing → CTA is banned)
+2. At least ONE section must be visually unconventional — asymmetric, editorial, broken-grid, or full-bleed immersive
+3. NEVER use the same layout type for two consecutive sections
+4. Introduce at least ONE density contrast: a dense/information-rich section immediately followed by an airy/spacious one
+5. Section ORDER must serve brand narrative — credibility brands lead with Stats, product-led with Features, trust-driven surface Testimonials early
+6. Background rhythm MUST alternate meaningfully — not just light/light/light. Use dark sections to create drama.
+
+Creative direction to apply:
+${tokens.creativeDirection?.designConcept ? `Concept: ${tokens.creativeDirection.designConcept}` : ''}
+${tokens.creativeDirection?.mustHaveMoments?.length ? `Must-have moments: ${tokens.creativeDirection.mustHaveMoments.join(' · ')}` : ''}
+${tokens.creativeDirection?.doNotDo?.length ? `Avoid: ${tokens.creativeDirection.doNotDo.join(' · ')}` : ''}
+
+Return JSON (only sections from available list + Hero):
+{
+  "sectionOrder": ["Hero", "Stats", "Features", "Testimonials", "CTA"],
+  "sections": {
+    "Hero": { "layout": "centered|split-left|split-right|asymmetric|immersive|editorial", "bg": "gradient|dark|light|pattern", "visual": "blobs|grid|illustration|product-ui|minimal" },
+    "Features": { "layout": "3-col-grid|bento-grid|alternating-rows|timeline|2-col-asymmetric", "bg": "light|dark|secondary|accent-tint", "cardStyle": "bordered|elevated|flat|gradient-border" },
+    "Stats": { "layout": "4-col-dividers|2x2-grid|horizontal-banner", "bg": "dark|primary|light|secondary", "style": "minimal-numbers|icon-led|gradient-text" },
+    "Testimonials": { "layout": "3-col|masonry|featured-center|single-large", "bg": "light|secondary|dark" },
+    "CTA": { "layout": "centered-gradient|split-dark|full-bleed|minimal-border", "bg": "gradient|dark|primary|accent" }
+  },
+  "globalAnimations": "fade-up|slide-in|scale-in|none",
+  "designNotes": "One sentence of creative direction specific to this brand"
+}`;
+
+  try {
+    return await withRetry(async () => {
+      const raw = (await ai.complete(system, user, 2048, { isJson: true })).trim()
+        .replace(/^```json?\n?/, '').replace(/\n?```$/, '');
+      return JSON.parse(raw);
+    }, ai, onLog, 'layout-strategy');
+  } catch (err) {
+    console.warn('[generateLayoutStrategy] Failed, using defaults:', err.message);
+    // Sensible defaults so the pipeline never crashes
+    return {
+      sectionOrder: ['Hero', ...comps.filter(c => c !== 'Hero')],
+      sections: {
+        Hero:         { layout: strategy.hero?.layout         || 'centered',           bg: 'gradient',   visual: strategy.hero?.visual || 'blobs' },
+        Features:     { layout: strategy.features?.layout     || '3-col-grid',         bg: 'light',      cardStyle: strategy.features?.cardStyle || 'bordered' },
+        Stats:        { layout: strategy.stats?.layout        || '4-col-dividers',     bg: 'secondary',  style: strategy.stats?.style || 'icon-led' },
+        Testimonials: { layout: strategy.testimonials?.layout || 'featured-center',    bg: 'light' },
+        CTA:          { layout: strategy.cta?.layout          || 'centered-gradient',  bg: 'gradient' },
+      },
+      globalAnimations: tokens.scrollAnimation || 'fade-up',
+      designNotes: '',
+    };
+  }
+}
+
 // ─── Step 2: Components ───────────────────────────────────────────────────────
 
-async function generateComponents(tokens, siteData, framework, ai, onLog = () => {}) {
+async function generateComponents(tokens, layout, siteData, framework, ai, onLog = () => {}) {
   const isReact = framework === 'react';
   const ext     = isReact ? 'jsx' : 'ts';
   const compDir = isReact ? 'src/components' : 'src/app/components';
-  const tokenCtx = buildTokenContext(tokens);
+  const tokenCtx = buildTokenContext(tokens, layout);
   const siteCtx  = buildSiteContext(siteData);
-  const navJson  = JSON.stringify(tokens.navLinks || []);
+  const navJson  = JSON.stringify((tokens.navLinks || []).slice(0, 5));
 
-  // NOTE: tokens.css is NOT AI-generated — it is built deterministically from extracted tokens
-  // in buildBoilerplate(). Generating it via AI caused smaller models (Llama etc.) to output
-  // JSX instead of CSS, corrupting the file.
+  // Pull layout-strategy specifics with safe fallbacks
+  const heroLayout   = layout?.sections?.Hero?.layout         || 'centered';
+  const heroVisual   = layout?.sections?.Hero?.visual         || 'blobs';
+  const heroCtaStyle = tokens.componentStrategy?.hero?.ctaStyle || 'dual-button';
+  const featLayout   = layout?.sections?.Features?.layout     || '3-col-grid';
+  const featCard     = layout?.sections?.Features?.cardStyle  || 'bordered';
+  const testLayout   = layout?.sections?.Testimonials?.layout || 'featured-center';
+  const statsLayout  = layout?.sections?.Stats?.layout        || '4-col-dividers';
+  const statsStyle   = layout?.sections?.Stats?.style         || 'icon-led';
+  const ctaLayout    = layout?.sections?.CTA?.layout          || 'centered-gradient';
+  const archetype    = tokens.styleArchetype                   || 'gradient-saas';
+  const toneOfVoice  = tokens.toneOfVoice                     || 'professional';
+  const ctaLanguage  = tokens.ctaLanguage                     || 'Get Started';
+
+  // Creative direction fields
+  const cd              = tokens.creativeDirection || {};
+  const designConcept   = cd.designConcept    || '';
+  const visualMotif     = cd.visualMotif      || '';
+  const layoutEnergy    = cd.layoutEnergy     || 'balanced';
+  const density         = cd.density         || 'balanced';
+  const doNotDo         = (cd.doNotDo        || []).join(' · ');
+  const mustHave        = (cd.mustHaveMoments || []).join(' · ');
+
+  // Controlled randomness: inject a design tension to push each generation in a slightly different direction
+  const designTensions  = ['minimal vs expressive', 'structured vs organic', 'calm vs energetic', 'precise vs fluid', 'restrained vs bold', 'dark vs luminous'];
+  const designTension   = designTensions[Math.floor(Math.random() * designTensions.length)];
+
+  // Creative constraints block — injected into every component prompt
+  const creativeBlock = `
+🎨 CREATIVE DIRECTION (follow strictly — this is what makes this site unique):
+Design concept: ${designConcept || `${archetype} aesthetic for ${tokens.brandPersonality} brand`}
+Visual motif: ${visualMotif || 'subtle brand-consistent visual theme'} — weave this throughout
+Layout energy: ${layoutEnergy} | Density: ${density}
+Design tension to explore: ${designTension}
+${doNotDo   ? `AVOID: ${doNotDo}` : ''}
+${mustHave  ? `MUST INCLUDE: ${mustHave}` : ''}
+
+🔥 GLOBAL DIRECTIVE: This component must feel crafted by a human designer with a strong opinion — not generated by AI. Make at least ONE unexpected visual decision that a generic template would never make.`;
+
+  // NOTE: tokens.css is NOT AI-generated — built deterministically in buildBoilerplate().
 
   const coreComponents = [
     {
       name: `Header.${ext}`, dir: compDir,
-      prompt: `Generate ONLY a complete, production-quality ${isReact ? 'React JSX' : 'Angular TS'} Header component for "${tokens.brandName}" (${tokens.siteType}).
+      prompt: `Generate ONLY a complete, production-quality ${isReact ? 'React JSX' : 'Angular TS'} Header component for "${tokens.brandName}".
 
 ${tokenCtx}
-Nav links: ${navJson}
+Nav links (MAX 5): ${navJson}
 
-CRITICAL STYLING RULES:
-- Use a <style> JSX tag with CSS classes — NEVER use inline style={{}} attributes
-- All CSS goes inside: <style>{\`...\`}</style> as the FIRST child inside the return()
-- Use class names prefixed with "hdr-" (e.g. hdr-nav, hdr-logo, hdr-cta)
-- CSS MUST include hover states (:hover), transitions, and @media (max-width: 768px) breakpoints
+STYLING RULES:
+- <style>{\`...\`}</style> as FIRST child in return(), "hdr-" prefixed classes — NO inline styles
+- Include :hover states, transitions, @media (max-width: 768px)
 
-DESIGN REQUIREMENTS:
-- Sticky top-0, z-index: 100, backdrop-filter: blur(16px) saturate(180%), background: rgba(bgColor, 0.85), border-bottom: 1px solid rgba(border, 0.6)
-- On scroll: add box-shadow via JS scroll listener (window.addEventListener('scroll', ...))
-- Logo left: ${siteData.logoUrl
-  ? `USE THE REAL BRAND LOGO — render it as: <img src="${siteData.logoUrl}" alt="${tokens.brandName}" className="hdr-logo-img" /> with CSS: .hdr-logo-img { height: 36px; width: auto; object-fit: contain; display: block; }. Place it BEFORE the brand name text, or use it INSTEAD of the brand name if the logo includes the full wordmark. Do NOT generate any placeholder SVG or initials shape.`
-  : `brand mark (geometric SVG shape or stylized initials) + brand name in --font-heading, font-weight 700`}
-- Nav links: centered or right, gap 32px, font-size 0.9rem, font-weight 500, color var(--text-muted). Hover: color var(--text), underline slide-in via ::after pseudo element
-- Active link: color var(--primary), ::after underline visible
-- CTA button right: filled --primary bg, white text, padding 10px 22px, border-radius var(--radius-full), font-weight 600. Hover: scale(1.03), shadow glow
-- Mobile (≤768px): hamburger icon (3 bars, 20×20px, gap 4px, 2px height bars), toggles a slide-down mobile nav with full-width links, 48px touch targets
-- Transition: height/opacity/transform 200ms ease on mobile menu open/close
+DESIGN — archetype: ${archetype}
+- Sticky, z-index 100. Background: rgba(var(--bg-rgb), 0.88), backdrop-filter: blur(20px) saturate(180%)
+- Border-bottom: 1px solid rgba(var(--border-rgb), 0.5). On scroll: add box-shadow via scroll listener.
+- Logo: ${siteData.logoUrl
+  ? `USE REAL LOGO → <img src="${siteData.logoUrl}" alt="${tokens.brandName}" className="hdr-logo-img" style treated as .hdr-logo-img { height: 36px; width: auto; object-fit: contain; display: block; }. Place BEFORE brand name or use INSTEAD of it. No placeholder SVG.`
+  : `geometric SVG mark (initials or shape fitting "${archetype}" archetype) + brand name in --font-heading, font-weight 700`}
+- Nav: gap 32px, font-size 0.9rem, weight 500, color var(--text-muted). Hover: color var(--text) + ::after underline slide-in
+- Active link: color var(--primary), underline visible
+- CTA: --primary bg, white text, padding 10px 22px, var(--radius-full). Hover: scale(1.03), glow shadow
+- Mobile (≤768px): 3-bar hamburger, slide-down nav, 48px touch targets
 
 REQUIRED IMPORTS:
-${isReact ? `import { useState, useEffect } from 'react';
-import { Link, useLocation } from 'react-router-dom';` : ''}
+${isReact ? `import { useState, useEffect } from 'react';\nimport { Link, useLocation } from 'react-router-dom';` : ''}
 import '../styles/tokens.css';
-
 ${isReact ? 'Default export function Header().' : 'Standalone Angular component.'}
-Return ONLY the complete raw file starting with the import statements. No markdown fences.`,
+Return ONLY raw file from imports. No markdown fences.`,
     },
     {
       name: `Footer.${ext}`, dir: compDir,
-      prompt: `Generate ONLY a complete, production-quality ${isReact ? 'React JSX' : 'Angular TS'} Footer component for "${tokens.brandName}".
+      prompt: `Generate ONLY a complete, production-quality ${isReact ? 'React JSX' : 'Angular TS'} Footer for "${tokens.brandName}".
 
 ${tokenCtx}
 Nav links: ${navJson}
-Tagline: ${tokens.tagline || ''}
+Tagline: "${tokens.tagline || ''}"
 
-CRITICAL STYLING RULES:
-- Use <style>{\`...\`}</style> CSS tag with "ftr-" prefixed class names — NOT inline styles
-- Include hover states, transitions, and @media (max-width: 768px) responsive layout
+STYLING: <style>{\`...\`}</style> with "ftr-" prefixed classes. @media (max-width: 768px).
 
-DESIGN — premium agency-quality footer like Vercel, Linear, or Stripe:
+DESIGN — premium footer (Vercel/Linear quality) — archetype: ${archetype}
 
-TOP SECTION:
-- Gradient line at the very top: 1px solid with a linear-gradient from transparent → var(--border) → transparent (decorative separator)
-- Background: dark — either #0a0a0a (if dark theme), or a very dark version of --bg-secondary (e.g. color-mix or hardcoded near-black). If light theme: use --bg-secondary with slightly lowered opacity.
-- Padding: 64px 0 32px
+STRUCTURE: dark background (#0d0d0d for dark archetype, near-black on light themes), padding 64px 0 32px.
+Gradient separator line at very top: 1px, linear-gradient(90deg, transparent, var(--border), transparent).
 
-MAIN GRID (4-column → 2-col tablet → 1-col mobile):
-Column 1 — BRAND:
-  - Logo: ${siteData.logoUrl
-    ? `USE THE REAL BRAND LOGO — render <img src="${siteData.logoUrl}" alt="${tokens.brandName}" className="ftr-logo-img" /> with CSS: .ftr-logo-img { height: 32px; width: auto; object-fit: contain; filter: brightness(0) invert(1); opacity: 0.9; } (invert to white on dark footer). Do NOT generate placeholder SVG.`
-    : `geometric SVG initials mark + brand name, font-weight 700, var(--font-heading)`}
-  - Tagline: "${tokens.tagline || ''}" — font-size: 0.9rem, color: var(--text-muted), max-width: 220px, line-height: 1.6, margin-top: 12px
-  - Social icon row (margin-top 24px, gap 12px): GitHub, Twitter/X, LinkedIn — use clean 20×20 SVG icons (inline), each in a 36×36 circle container (background: rgba(255,255,255,0.05), border: 1px solid rgba(255,255,255,0.1), border-radius: 50%, display flex, center). Hover: background rgba(primary, 0.15), border-color: var(--primary), transform: translateY(-2px), transition: 200ms
+4-COLUMN GRID (→ 2-col tablet → 1-col mobile):
+Col 1 BRAND:
+- ${siteData.logoUrl
+  ? `Real logo: <img src="${siteData.logoUrl}" className="ftr-logo-img" /> CSS: height:32px; filter:brightness(0) invert(1); opacity:0.9`
+  : `SVG initials mark + brand name`}
+- Tagline text, max-width 200px, color rgba(255,255,255,0.5)
+- LinkedIn + Twitter/X social icons (20×20 SVG, 36×36 circle containers, rgba(255,255,255,0.05) bg, hover lift)
 
-Column 2 — PRODUCT links (relevant to ${tokens.siteType}): 5-6 links
-Column 3 — COMPANY links: About, Blog, Careers, Press, Contact
-Column 4 — NEWSLETTER SIGNUP:
-  - Heading: "Stay updated" font-size 0.95rem, font-weight 700
-  - Sub: "Get the latest news and articles." font-size 0.85rem, var(--text-muted)
-  - Input row: email input (background rgba(255,255,255,0.05), border 1px solid rgba(255,255,255,0.12), border-radius var(--radius-full), padding 10px 16px, color var(--text), font-size 0.9rem, flex: 1) + "Subscribe" button (--primary bg, white text, border-radius var(--radius-full), padding 10px 20px, font-weight 600, no-shrink). Row display: flex, gap 8px.
-  - Input focus: border-color var(--primary), box-shadow 0 0 0 3px rgba(primary,0.15), outline none
+Col 2 "SERVICES": 4-5 links relevant to ${tokens.siteType}
+Col 3 "COMPANY": About Us, Our Team, Careers, Contact
+Col 4 NEWSLETTER: "Stay updated" heading + email input + Subscribe button (flex row, --primary bg btn)
 
-COLUMN LINK STYLING:
-- Column heading: font-size: 0.75rem, font-weight: 700, letter-spacing: 0.1em, text-transform: uppercase, color: var(--text-muted), margin-bottom: 16px
-- Links: font-size: 0.9rem, color: var(--text-muted), text-decoration: none, display: block, margin-bottom: 10px. Hover: color: var(--text), transition: 150ms. Active/current: color var(--primary)
-
-BOTTOM BAR:
-- Divider: 1px solid rgba(255,255,255,0.06) (or var(--border) at 40% opacity)
-- Padding: 24px 0. Display flex, justify-content space-between, align-items center. Stack on mobile.
-- Left: "© ${new Date().getFullYear()} ${tokens.brandName}. All rights reserved." — font-size 0.85rem, var(--text-muted)
-- Right: Privacy Policy · Terms of Service · Cookie Policy — font-size 0.85rem, var(--text-muted), gap 24px, hover: var(--text)
+LINK STYLING: 0.75rem uppercase letter-spacing headings; 0.9rem links, rgba(255,255,255,0.5) color, hover white.
+BOTTOM BAR: flex space-between, © ${new Date().getFullYear()} ${tokens.brandName}. All rights reserved. | Privacy · Terms · Cookies
 
 REQUIRED IMPORTS:
 import '../styles/tokens.css';
 ${isReact ? 'Default export function Footer().' : ''}
-Return ONLY the complete raw file. No markdown fences.`,
+Return ONLY raw file. No markdown fences.`,
     },
     {
       name: `Layout.${ext}`, dir: compDir,
-      prompt: `Generate ONLY the ${isReact ? 'React JSX' : 'Angular TS'} Layout component for "${tokens.brandName}".
-This is a simple wrapper: Header + {children} + Footer.
+      prompt: `Generate ONLY the ${isReact ? 'React JSX' : 'Angular TS'} Layout wrapper for "${tokens.brandName}".
 
-${isReact ? `REQUIRED IMPORTS:
-import Header from './Header';
-import Footer from './Footer';
-import '../styles/tokens.css';
-
-Export: export default function Layout({ children }) { return (<><Header /><main>{children}</main><Footer /></>); }
-
-Add a <style> tag with: .layout-main { min-height: calc(100vh - 140px); }` : 'Standalone Angular with router-outlet. Import Header and Footer components.'}
-Return ONLY the complete raw file. No markdown fences.`,
+${isReact ? `Import Header, Footer, tokens.css.
+export default function Layout({ children }) {
+  return (<><Header /><main className="layout-main">{children}</main><Footer /></>);
+}
+Add <style> with: .layout-main { min-height: calc(100vh - 140px); }` : 'Angular: router-outlet between Header and Footer.'}
+Return ONLY raw file. No markdown fences.`,
     },
     {
       name: `Hero.${ext}`, dir: compDir,
-      prompt: `Generate ONLY a complete, world-class ${isReact ? 'React JSX' : 'Angular TS'} Hero component for "${tokens.brandName}".
+      prompt: `Design a visually striking, non-generic Hero section for "${tokens.brandName}" that expresses the creativeDirection below. This MUST feel custom-designed for this brand — not reusable for any other site.
 
 ${tokenCtx}
 ${siteCtx}
+${creativeBlock}
 
-STYLING: <style>{\`...\`}</style> first in return(), "hero-" prefixed classes, hover states, @media (max-width: 768px) + @media (max-width: 480px).
+STYLING: <style>{\`...\`}</style> first, "hero-" prefixed classes, @media (max-width: 768px) + (max-width: 480px).
 
-DESIGN — make this look like it cost $50,000 to design:
+LAYOUT TYPE: "${heroLayout}" — follow this strictly:
+${heroLayout === 'split-left'    ? '- Split: text LEFT (max-width 520px), visual element RIGHT. Equal columns. Text left-aligned.' : ''}
+${heroLayout === 'split-right'   ? '- Split: visual LEFT, text RIGHT (max-width 520px). Text left-aligned.' : ''}
+${heroLayout === 'asymmetric'    ? '- Asymmetric: 60/40 split. Intentional imbalance. Left-heavy text block, right decorative.' : ''}
+${heroLayout === 'immersive'     ? '- Full viewport immersive. Background IS the design. Content centered, overlaid. Dramatic.' : ''}
+${heroLayout === 'editorial'     ? '- Editorial: large typographic statement. Minimal decoration. Grid-based alignment. Like NYT or Bloomberg.' : ''}
+${heroLayout === 'centered'      ? '- Centered: text + CTAs centered. Visual elements as background/beneath content.' : ''}
 
-BACKGROUND:
-- Full viewport: min-height: 100vh, display flex, align-items center
-- Background: use --gradient or a radial-gradient mesh. Add 2-3 decorative blurred blobs (div.hero-blob, position: absolute, border-radius: 50%, filter: blur(80px), opacity: 0.35, various sizes 300-600px, placed off-center)
-- Subtle @keyframes "float" animation on blobs (translateY ±20px, 6-8s ease-in-out infinite alternate)
-- Add a very subtle noise/grain texture overlay using SVG filter or CSS noise pattern (optional but premium)
+VISUAL: "${heroVisual}"
+${heroVisual === 'blobs'         ? '- 2-3 blurred gradient blobs (position:absolute, filter:blur(80px), opacity:0.35, 300-600px circles)' : ''}
+${heroVisual === 'product-ui'    ? '- Mockup of product UI (use realistic placeholder divs styled as UI components — cards, graphs, etc.)' : ''}
+${heroVisual === 'abstract-grid' ? '- Subtle CSS grid/dot pattern overlay + geometric line shapes' : ''}
+${heroVisual === 'minimal'       ? '- Zero visual decoration. Typography IS the design. Maximum white space.' : ''}
+${heroVisual === 'pattern'       ? '- Repeating pattern background (CSS radial-gradient dots or lines)' : ''}
 
-BADGE: Pill above headline — e.g. "✦ Introducing ${tokens.brandName}" or a product announcement. Style: background rgba(primary,0.1), border 1px solid rgba(primary,0.25), border-radius 9999px, font-size 0.8rem, padding 6px 16px, font-weight 500. Fade-in animation.
+CONTENT:
+- Badge: pill with "✦ ${tokens.tagline || tokens.brandName}" — rgba(primary,0.1) bg, border, border-radius 9999px
+- Headline: clamp(3rem, 7vw, 5.5rem), weight 800-900, tracking -0.04em, line-height 1.05. Match "${tokens.headlineStyle}" style. Max 10 words.
+- Subheadline: clamp(1rem, 2vw, 1.25rem), line-height 1.7, max-width 560px, var(--text-muted)
+- CTAs (${heroCtaStyle}): primary="${ctaLanguage}" (--primary bg), secondary="Learn More" (bordered). Hover: translateY(-2px) scale(1.02), glow
+- Social proof row: stars + trust signals relevant to "${tokens.brandName}" audience: "${tokens.targetAudience}"
+- Real content: brand="${tokens.brandName}", desc="${siteData.description || ''}"
 
-HEADLINE:
-- font-size: clamp(3rem, 7vw, 5.5rem), font-weight: 800-900, letter-spacing: -0.04em, line-height: 1.05
-- Use gradient text via background-clip: text if appropriate for the style (e.g. gradient from --primary to --accent on key words)
-- Max 10 words, punchy and brand-accurate
-
-SUBHEADLINE: font-size: clamp(1rem, 2vw, 1.25rem), line-height: 1.7, max-width: 560px, color: var(--text-muted), margin: 24px auto/0
-
-CTA ROW:
-- Primary button: background: var(--primary), color: #fff, padding: 14px 32px, border-radius: var(--radius-full), font-weight: 600, font-size: 1rem. Hover: transform: translateY(-2px) scale(1.02), box-shadow: 0 8px 30px rgba(primary,0.4)
-- Secondary button: transparent bg, border: 1.5px solid var(--border), same padding. Hover: background var(--bg-secondary), border-color var(--primary)
-- Gap: 12px between buttons
-
-SOCIAL PROOF ROW (below CTAs):
-- 3-5 trust signals: e.g. "★★★★★ 4.9/5" or "10,000+ users" or logos row (use placeholder text-based company name badges)
-- Small font, muted color, dash separator between items
-
-REAL CONTENT:
-- Brand: "${tokens.brandName}"
-- Tagline: "${tokens.tagline || 'The future of ' + tokens.siteType}"
-- Description: "${siteData.description || ''}"
+TONE: ${toneOfVoice}. Headline must NOT sound generic SaaS. Write as a ${tokens.brandPersonality} brand.
 
 REQUIRED IMPORTS:
 import { useEffect, useRef } from 'react';
 import '../styles/tokens.css';
 ${isReact ? 'Default export function Hero().' : ''}
-Return ONLY the complete raw file starting with imports. No markdown fences.`,
+Return ONLY raw file from imports. No markdown fences.`,
     },
   ];
 
-  // Determine which extra components to generate based on siteType and requested components
-  const requestedExtras = (tokens.components || [])
-    .filter(c => !['Header','Footer','Layout','Hero'].includes(c));
+  // ─── Extra components (adaptive prompts) ───────────────────────────────────
 
   const extraDefs = {
     Features: {
-      prompt: (name) => `Generate ONLY a complete React JSX Features/Benefits component for "${tokens.brandName}" (${tokens.siteType}).
+      prompt: () => `Design a visually distinctive Features section for "${tokens.brandName}" (${tokens.siteType}). This must feel custom — not a generic feature grid.
 ${tokenCtx}
 ${siteCtx}
+${creativeBlock}
 
-STYLING: <style>{\`...\`}</style> with "feat-" prefixed classes. @media (max-width: 768px) + @media (max-width: 480px).
+STYLING: <style>{\`...\`}</style> with "feat-" prefixed classes. @media (max-width: 768px) + (max-width: 480px).
 
-DESIGN — make this look like a Stripe/Linear features section:
-LAYOUT: 3-column grid (→ 2-col tablet → 1-col mobile), gap: 24px. Section padding: 96px 0.
-HEADER: Eyebrow label ("WHY CHOOSE US" in caps, letter-spacing: 0.1em, --primary color, font-size 0.8rem) above heading. Heading: clamp(2rem, 4vw, 3rem), centered. Subtext: max-width: 560px, centered, --text-muted.
-CARDS: background var(--bg-card, var(--bg-secondary)), border: 1px solid var(--border), border-radius var(--radius-lg), padding 32px. Hover: translateY(-4px), box-shadow var(--shadow-lg), border-color rgba(primary,0.4), transition 200ms.
-ICON: 48×48px container, background rgba(primary,0.1), border-radius var(--radius), display flex, center. Inside: relevant geometric SVG icon (not emoji) in var(--primary), 24×24.
-TITLE: font-size 1.1rem, font-weight 700, margin-top 16px, letter-spacing -0.01em.
-DESC: font-size 0.95rem, line-height 1.7, color var(--text-muted), margin-top 8px.
-Use REAL features for "${tokens.brandName}": "${siteData.description || ''}" — at least 6 cards.
+STRUCTURE RULES (override generic defaults):
+- DO NOT default to equal uniform cards — vary emphasis and hierarchy
+- At least ONE feature must be visually dominant (larger, different treatment)
+- Apply the visual motif "${visualMotif}" as a recurring accent element
+
+LAYOUT: "${featLayout}" — implement this layout type precisely:
+${featLayout === '3-col-grid'        ? '- 3-column equal grid → 2-col tablet → 1-col mobile. Uniform card heights.' : ''}
+${featLayout === 'bento-grid'        ? '- Bento grid: CSS grid with varying card sizes (1 large + 2 small + 1 medium + 2 small). Asymmetric but balanced.' : ''}
+${featLayout === 'alternating-rows'  ? '- Alternating rows: icon/text LEFT then RIGHT each row. 2-column, full-width rows. Generous spacing.' : ''}
+${featLayout === 'timeline'          ? '- Vertical timeline: center line, alternating left/right content blocks, connected dots.' : ''}
+${featLayout === '2-col-asymmetric'  ? '- 2-column asymmetric: left column 40% (large feature), right column 60% (2×2 smaller features).' : ''}
+
+CARD STYLE: "${featCard}"
+${featCard === 'bordered'        ? '- border: 1px solid var(--border), no shadow by default, hover: border-color rgba(primary,0.4), shadow-lg' : ''}
+${featCard === 'elevated'        ? '- box-shadow: var(--shadow-card), no border, hover: translateY(-6px), shadow-lg' : ''}
+${featCard === 'flat'            ? '- No border, no shadow. Background tint only. Hover: bg-secondary.' : ''}
+${featCard === 'gradient-border' ? '- Gradient border: use CSS background-clip trick or pseudo-element gradient border. Glows on hover.' : ''}
+
+SECTION HEADER: Eyebrow ("WHY CHOOSE ${tokens.brandName.toUpperCase()}", letter-spacing 0.1em, --primary, 0.8rem) + heading clamp(2rem,4vw,3rem) + subtext max-width 560px.
+ICONS: 48×48 containers, rgba(primary,0.1) bg, 24×24 SVG (geometric, not emoji). Unique icon per feature.
+Write 6 REAL features for "${tokens.brandName}" audience: "${tokens.targetAudience}".
+Tone: ${toneOfVoice}.
 
 Import '../styles/tokens.css'; Default export.
-Return ONLY the complete raw JSX file.`
+Return ONLY complete raw JSX file.`
     },
+
     Testimonials: {
-      prompt: (name) => `Generate ONLY a complete React JSX Testimonials component for "${tokens.brandName}".
+      prompt: () => `Design a compelling Testimonials section for "${tokens.brandName}" that feels emotionally real — not like AI filler.
 ${tokenCtx}
+${creativeBlock}
 
-STYLING: Use <style>{\`...\`}</style> with "test-" prefixed classes. Include hover states and @media (max-width: 768px).
+STYLING: <style>{\`...\`}</style> with "test-" prefixed classes. @media (max-width: 768px).
 
-DESIGN — Stripe/Notion-quality social proof section:
+CONTENT RULES (critical — generic testimonials ruin credibility):
+Each testimonial MUST include: (1) a specific scenario/context, (2) a measurable outcome or metric, (3) an emotional resonance authentic to "${tokens.targetAudience}"
+NO generic phrases like "highly recommend" or "great experience" — write vivid, specific, believable quotes.
 
-SECTION LAYOUT:
-- Background: var(--bg-secondary) or a very light tint of --primary (e.g. rgba(primary,0.03))
-- Section padding: 96px 0. Max-width 1200px container, centered.
-- Eyebrow label: "TRUSTED BY THOUSANDS" in caps, letter-spacing: 0.12em, font-size: 0.75rem, color var(--primary), font-weight: 600
-- Section heading: clamp(1.8rem, 4vw, 2.75rem), font-weight: 800, letter-spacing: -0.03em, color var(--text)
-- Grid: 3 columns on desktop → 2 tablet → 1 mobile, gap: 24px
+LAYOUT: "${testLayout}"
+${testLayout === '3-col'            ? '- 3 equal columns, uniform cards.' : ''}
+${testLayout === 'masonry'          ? '- Masonry/Pinterest layout: CSS columns:3, varying card heights, natural flow.' : ''}
+${testLayout === 'featured-center'  ? '- Center card larger/elevated (scale 1.04, featured border), flanked by 2 smaller cards.' : ''}
+${testLayout === 'single-large'     ? '- One large featured quote taking 2/3 width + 2 stacked smaller quotes on right.' : ''}
 
-TESTIMONIAL CARDS:
-- Background: var(--bg) or white, border: 1px solid var(--border), border-radius: var(--radius-lg)
-- Padding: 32px. Box-shadow: var(--shadow-card, 0 1px 4px rgba(0,0,0,.06), 0 8px 32px rgba(0,0,0,.08))
-- Hover: translateY(-5px), box-shadow: var(--shadow-lg), border-color: rgba(primary,0.25), transition: 220ms cubic-bezier(0.4,0,0.2,1)
+SECTION: bg var(--bg-secondary) or rgba(primary,0.03). Padding 96px 0. Eyebrow "TRUSTED BY LEADING ${tokens.siteType.toUpperCase()}S" + heading clamp(1.8rem,4vw,2.75rem).
 
-CARD INTERNALS (top to bottom):
-1. STAR RATING: 5 gold stars (★★★★★) color: #f59e0b, font-size: 1rem, margin-bottom: 16px
-2. QUOTE: Large opening quote SVG icon (") in var(--primary) at 32px, opacity 0.3, positioned top-left. Quote text: font-size: 1.05rem, line-height: 1.75, color: var(--text), font-style: italic, margin-bottom: 24px
-3. DIVIDER: 1px solid var(--border), margin: 0
-4. AUTHOR ROW (margin-top: 20px): Avatar circle (40×40px, background: var(--gradient), border-radius: 50%, display flex, align-items center, font-size 0.9rem font-weight 700 color #fff initials) + flex-col: author name (font-weight: 700, font-size: 0.95rem) + role & company (font-size: 0.8rem, color: var(--text-muted))
+CARDS: bg var(--bg), border 1px solid var(--border), border-radius var(--radius-lg), padding 32px.
+Hover: translateY(-5px), shadow-lg, border-color rgba(primary,0.25).
+Contents: ★★★★★ (#f59e0b) → large quote mark (opacity 0.2) → italic quote → divider → avatar (initials circle, --gradient bg) + name + role/company.
+Featured card: border-color var(--primary), box-shadow 0 0 0 1px var(--primary), 0 8px 40px rgba(primary-rgb, 0.15).
 
-FEATURED CARD (middle): Add data-featured styling — border-color: var(--primary), box-shadow: 0 0 0 1px var(--primary), 0 8px 40px rgba(primary,0.15)
-
-Make 3 vivid, specific, realistic testimonials for "${tokens.brandName}" (${tokens.siteType}) — no generic "Great product!" quotes. Include specific results/metrics in each quote.
-
-REQUIRED IMPORTS:
-import '../styles/tokens.css';
-Default export.
-Return ONLY the complete raw JSX file.`
-    },
-    CTA: {
-      prompt: (name) => `Generate ONLY a complete React JSX CTA (Call-to-Action) section for "${tokens.brandName}".
-${tokenCtx}
-
-STYLING: <style>{\`...\`}</style> with "cta-" prefixed classes. Hover states, transitions.
-
-DESIGN — high-converting, visually memorable:
-BACKGROUND: Full-width section, padding 96px 0. Use --gradient as background. Add 2-3 decorative blobs (position: absolute, border-radius 50%, filter blur(60px), opacity 0.2, var(--accent) or white color) for depth. Overflow: hidden on section.
-CONTENT: max-width 640px, centered, position relative z-index 1.
-EYEBROW: Small badge/pill — "Get Started Today" — background rgba(white,0.15), border 1px solid rgba(white,0.25), border-radius 9999px, color white, padding 6px 16px, font-size 0.8rem.
-HEADLINE: clamp(2.2rem, 5vw, 3.5rem), font-weight 800, letter-spacing -0.03em, color #fff, line-height 1.1. Two lines max.
-SUBTEXT: font-size 1.1rem, color rgba(255,255,255,0.8), line-height 1.7, margin-top 16px.
-BUTTONS: Row, gap 12px, justify-content center, margin-top 32px.
-  Primary: background #fff, color var(--primary), padding 14px 36px, border-radius var(--radius-full), font-weight 700. Hover: scale(1.03), shadow 0 8px 30px rgba(0,0,0,0.2).
-  Secondary: background transparent, border 2px solid rgba(white,0.5), color #fff, same sizing. Hover: background rgba(white,0.1), border-color #fff.
-TRUST LINE: Below buttons — small text "No credit card required · Free 14-day trial · Cancel anytime" or similar, color rgba(white,0.6), font-size 0.85rem.
-
-CONTENT: Use real "${tokens.brandName}" messaging from: "${siteData.description || tokens.tagline || ''}"
+Write 3 vivid, SPECIFIC testimonials for "${tokens.brandName}" — real metrics, no generic praise.
+Tone: ${toneOfVoice}. Audience: "${tokens.targetAudience}".
 
 Import '../styles/tokens.css'; Default export.
-Return ONLY the complete raw JSX file.`
+Return ONLY complete raw JSX file.`
     },
-    Stats: {
-      prompt: (name) => `Generate ONLY a complete React JSX Stats/Numbers section for "${tokens.brandName}" (${tokens.siteType}).
+
+    CTA: {
+      prompt: () => `Design an emotionally resonant, visually striking CTA section for "${tokens.brandName}" — this is the last impression. Make it memorable.
 ${tokenCtx}
+${creativeBlock}
 
-STYLING: Use <style>{\`...\`}</style> with "stat-" prefixed classes. Include @media (max-width: 768px).
+STYLING: <style>{\`...\`}</style> with "cta-" prefixed classes.
 
-DESIGN — make this feel like Linear or Vercel's metrics section:
+LAYOUT: "${ctaLayout}"
+${ctaLayout === 'centered-gradient' ? '- Full-width gradient bg (--gradient), content centered, max-width 640px. Decorative blobs.' : ''}
+${ctaLayout === 'split-dark'        ? '- 2-column split: left dark bg with large heading, right lighter with form or trust signals.' : ''}
+${ctaLayout === 'full-bleed'        ? '- Full-bleed: extreme padding 120px 0, immersive gradient, very large headline.' : ''}
+${ctaLayout === 'minimal-border'    ? '- Minimal: white bg, subtle border-radius container, refined typography, no gradient flash.' : ''}
 
-SECTION:
-- Background: var(--bg) or near-white. Padding: 80px 0. Max-width 1100px container.
-- Optional subtle background: very light repeating dot grid via CSS background-image (radial-gradient 1px circles, rgba(0,0,0,0.05)) — gives technical depth
-- Section tag above: small eyebrow label "BY THE NUMBERS" in caps, letter-spacing: 0.1em, var(--primary), 0.75rem
+CONTENT (fit the "${toneOfVoice}" tone):
+- Eyebrow pill: rgba(white,0.15) bg, white border, brand-relevant label — NOT generic "Get Started Today"
+- Headline: clamp(2.2rem,5vw,3.5rem), weight 800, white, 2 lines max. Make it emotionally resonant for "${tokens.targetAudience}"
+- Subtext: rgba(255,255,255,0.8), 1.1rem, line-height 1.7
+- Primary CTA: "${ctaLanguage}" — white bg, var(--primary) text, hover scale(1.03)
+- Secondary CTA: transparent, white border, hover rgba(white,0.1)
+- Trust line: specific to "${tokens.brandName}" (not generic "No credit card required" unless relevant)
 
-GRID LAYOUT:
-- 4-column grid on desktop → 2×2 on tablet → 1-col on mobile, gap: 2px (border as separator)
-- Each cell: padding 48px 32px, text-align center
-- Separator style: 1px solid var(--border) between cells (use border-right / border-bottom trick)
+Import '../styles/tokens.css'; Default export.
+Return ONLY complete raw JSX file.`
+    },
 
-STAT CELL (top to bottom):
-1. ICON (optional): 32×32 inline SVG in var(--primary), opacity 0.7, margin-bottom 12px
-2. NUMBER: font-size: clamp(2.5rem, 5vw, 4rem), font-weight: 900, letter-spacing: -0.04em, color: var(--primary) — OR use gradient text (background: var(--gradient), -webkit-background-clip: text)
-3. SUFFIX/PREFIX: "+" or "%" appended inline, font-size: 60% of number, font-weight: 700, color: var(--accent)
-4. LABEL: font-size: 1rem, font-weight: 600, color: var(--text), margin-top: 4px
-5. SUBLABEL: font-size: 0.85rem, color: var(--text-muted), line-height: 1.5
+    Stats: {
+      prompt: () => `Design a Stats section for "${tokens.brandName}" that makes numbers feel like a story — not a uniform data table.
+${tokenCtx}
+${creativeBlock}
 
-ANIMATION: Use useEffect + IntersectionObserver. When stat enters viewport, animate the number from 0 to final value using a counter increment over 1.5s with ease-out easing (requestAnimationFrame). Do NOT rely on external libraries.
+STYLING: <style>{\`...\`}</style> with "stat-" prefixed classes. @media (max-width: 768px).
 
-USE REAL context for "${tokens.brandName}" (${tokens.siteType}) — impressive, believable metrics (e.g. users, uptime, countries, NPS score, time saved).
+HIERARCHY RULES:
+- Stats MUST NOT be uniform blocks of equal visual weight
+- Use hierarchy: 1 hero stat (largest, most impactful) + supporting stats
+- Add contextual micro-labels below each number (story-driven, not just unit labels)
+- Apply visual motif "${visualMotif}" as a subtle accent in this section
+
+LAYOUT: "${statsLayout}"
+${statsLayout === '4-col-dividers'   ? '- 4 equal columns, 1px var(--border) dividers between cells (border-right trick). Padding 48px 32px each.' : ''}
+${statsLayout === '2x2-grid'         ? '- 2×2 grid with gap 24px. Each cell is a card with border-radius var(--radius-lg).' : ''}
+${statsLayout === 'horizontal-banner'? '- Single horizontal row, full-width, stats inline. bg var(--primary) or dark. White text.' : ''}
+
+NUMBER STYLE: "${statsStyle}"
+${statsStyle === 'minimal-numbers'  ? '- Just the number, very large (clamp(3rem,6vw,5rem)), weight 900, --primary color. No icons.' : ''}
+${statsStyle === 'icon-led'         ? '- 32×32 SVG icon above number, icon in --primary, opacity 0.8.' : ''}
+${statsStyle === 'gradient-text'    ? '- Number uses gradient text: background var(--gradient), -webkit-background-clip: text, color transparent.' : ''}
+${statsStyle === 'bordered-cells'   ? '- Each stat in a bordered card, border-radius var(--radius-lg), hover lift effect.' : ''}
+
+ANIMATION: useEffect + IntersectionObserver + requestAnimationFrame counter (0 → value, 1.5s ease-out). No libraries.
+SUFFIX: +/% in --accent, font-size 60% of number.
+
+Stats MUST be real, credible metrics for "${tokens.brandName}" (${tokens.siteType}) audience: "${tokens.targetAudience}".
+NOT generic "99.9% uptime" — use context-appropriate numbers (cases won, countries, years, clients, awards, etc).
 
 REQUIRED IMPORTS:
 import { useEffect, useRef, useState } from 'react';
 import '../styles/tokens.css';
 Default export.
-Return ONLY the complete raw JSX file.`
+Return ONLY complete raw JSX file.`
     },
+
     Pricing: {
-      prompt: (name) => `Generate ONLY a complete React JSX Pricing section for "${tokens.brandName}" (${tokens.siteType}).
+      prompt: () => `Generate ONLY a complete React JSX Pricing section for "${tokens.brandName}" (${tokens.siteType}).
 ${tokenCtx}
 
-STYLING: Use <style>{\`...\`}</style> with "price-" prefixed classes. Include hover states and @media (max-width: 768px).
+STYLING: <style>{\`...\`}</style> with "price-" prefixed classes. @media (max-width: 768px).
 
-DESIGN — premium SaaS pricing like Vercel, Linear, or Lemon Squeezy:
+DESIGN — premium SaaS pricing (Vercel / Linear / Lemon Squeezy quality):
+- Eyebrow + heading "Simple, Transparent Pricing" + subtext
+- Monthly/Annual toggle (useState). Annual shows "Save 20%" badge in --accent.
+- 3-column grid (→ 1-col mobile). Middle card: scale(1.04), --gradient or --primary bg, "MOST POPULAR" badge, white text.
+- Card anatomy: tier name → price (clamp(2.5rem,5vw,3.5rem), weight 900) → description → divider → feature list (SVG checkmarks) → CTA button.
+- Annual pricing: monthly × 0.8, strikethrough original.
+- REAL features/tiers for "${tokens.brandName}" (${tokens.siteType}).
 
-SECTION HEADER:
-- Eyebrow: "PRICING" in caps, letter-spacing 0.12em, var(--primary), 0.75rem, font-weight 600
-- Heading: "Simple, Transparent Pricing" — clamp(1.8rem, 4vw, 2.75rem), font-weight 800, letter-spacing -0.03em
-- Subtext: "No hidden fees. Cancel anytime." — color: var(--text-muted)
-- BILLING TOGGLE: Monthly / Annual switch (use useState). Pill-shaped toggle: background var(--bg-secondary), border var(--border), padding 4px, border-radius 9999px. Active option: background var(--primary), color #fff, border-radius 9999px, padding 6px 20px. Annual shows "Save 20%" badge (background: rgba(accent,0.15), color: var(--accent), border-radius 9999px, font-size 0.7rem, font-weight 700).
-
-GRID: 3 columns on desktop → 1-col stacked on mobile, gap: 24px, align-items start (popular card is taller via extra padding).
-
-CARD ANATOMY:
-
-Standard cards (Starter & Enterprise):
-- Background: var(--bg), border: 1px solid var(--border), border-radius: var(--radius-lg), padding: 32px
-- Hover: translateY(-4px), border-color: rgba(primary, 0.3), box-shadow: var(--shadow-lg), transition: 220ms
-
-Popular card (Pro/Growth — the MIDDLE):
-- Transform: scale(1.04) on desktop to make it stand out
-- Background: var(--gradient) or var(--primary), color: #fff
-- Box-shadow: 0 0 0 2px var(--primary), 0 20px 60px rgba(primary,0.3)
-- Border-radius: var(--radius-lg)
-- "MOST POPULAR" badge: top of card, centered — background rgba(255,255,255,0.2), color #fff, border-radius 9999px, font-size 0.7rem, font-weight 700, padding 4px 16px, letter-spacing 0.08em
-- All text on white/light for popular card, feature checkmarks in rgba(255,255,255,0.9)
-
-CARD INTERNALS (top to bottom):
-1. Tier name: font-size: 1rem, font-weight: 700, letter-spacing: 0.05em, text-transform uppercase
-2. Price display: font-size: clamp(2.5rem, 5vw, 3.5rem), font-weight: 900, letter-spacing: -0.04em. Billing period: font-size: 0.9rem, font-weight: 400, opacity 0.7
-3. Short description: 1 sentence, font-size: 0.9rem, color var(--text-muted), margin: 12px 0 24px
-4. Divider: 1px solid var(--border) (or rgba(white,0.2) for popular)
-5. Feature list: margin-top: 24px, list-style none. Each item: display flex, align-items flex-start, gap 10px, margin-bottom 12px, font-size 0.9rem. Checkmark: inline SVG (✓) in 18×18px circle — background rgba(primary,0.1) + color var(--primary) for standard, rgba(255,255,255,0.2) + white for popular
-6. CTA button: margin-top 32px, full-width, padding 14px 24px, border-radius var(--radius-full), font-weight 700, font-size 1rem. Standard: var(--primary) bg + white text. Popular: white bg + var(--primary) text. Hover: scale(1.02) + deeper shadow.
-
-ANNUAL PRICING LOGIC: When annual toggle active, show discounted price (monthly × 0.8) with a strikethrough of original monthly price inline.
-
-Build REAL feature lists appropriate for "${tokens.brandName}" (${tokens.siteType}).
-
-REQUIRED IMPORTS:
-import { useState } from 'react';
-import '../styles/tokens.css';
-Default export.
-Return ONLY the complete raw JSX file.`
+import { useState } from 'react'; import '../styles/tokens.css'; Default export.
+Return ONLY complete raw JSX file.`
     },
+
     FAQ: {
-      prompt: (name) => `Generate ONLY a complete React JSX FAQ accordion component for "${tokens.brandName}".
+      prompt: () => `Generate ONLY a complete React JSX FAQ accordion for "${tokens.brandName}".
 ${tokenCtx}
 
-STYLING: Use <style>{\`...\`}</style> with "faq-" prefixed classes. Include transitions and @media (max-width: 768px).
+STYLING: <style>{\`...\`}</style> with "faq-" prefixed classes.
+- Smooth accordion: max-height transition 300ms cubic-bezier(0.4,0,0.2,1). One open at a time (useState openIndex).
+- Chevron rotates 180° when open. Border-bottom-only dividers (no card containers).
+- Question hover: bg var(--bg-secondary). Active question: color var(--primary).
+- 7-8 REAL, specific FAQs for "${tokens.brandName}" (${tokens.siteType}). No generic questions.
 
-DESIGN — smooth, polished accordion like Framer or Radix UI docs:
-
-SECTION LAYOUT:
-- Padding: 96px 0. Background: var(--bg). Max-width: 800px centered.
-- Eyebrow: "FAQ" in caps, letter-spacing: 0.12em, var(--primary), 0.75rem, font-weight: 600
-- Heading: "Frequently Asked Questions" — clamp(1.8rem, 4vw, 2.75rem), font-weight: 800, letter-spacing: -0.03em
-- Subtext: "Everything you need to know. Can't find the answer? Reach out to our team." — var(--text-muted)
-- Items list: margin-top: 48px, display: flex, flex-direction: column, gap: 0
-
-ACCORDION ITEM:
-- Container: border-bottom: 1px solid var(--border). First item also has border-top: 1px solid var(--border).
-- No outer box-shadow or card container — minimal, editorial feel
-
-QUESTION ROW:
-- Button (full width, no browser default): display flex, justify-content space-between, align-items center, padding: 24px 0, cursor pointer, background: transparent
-- Question text: font-size: 1.05rem, font-weight: 600, color: var(--text), line-height: 1.5, text-align: left, flex: 1
-- Active question text: color: var(--primary)
-- Icon: 24×24px chevron SVG (or +/× icon). Closed state: rotate(0deg). Open state: rotate(180deg for chevron, 45deg for +). Transition: transform 250ms cubic-bezier(0.4,0,0.2,1). Color: var(--text-muted), active: var(--primary)
-
-ANSWER PANEL:
-- Animated expand/collapse using max-height trick: closed max-height: 0, open max-height: 500px, overflow: hidden, transition: max-height 300ms cubic-bezier(0.4,0,0.2,1)
-- Answer text inside: padding: 0 0 24px 0, font-size: 0.95rem, line-height: 1.75, color: var(--text-muted)
-- Optional: answer can have inline <strong> or <a href="#"> links styled in var(--primary)
-
-STATE MANAGEMENT: Use useState with openIndex (only one open at a time). Click same item → closes it.
-
-HOVER EFFECT: On question row hover, question text color: var(--text) with smooth 150ms transition. Subtle background: hover adds background: var(--bg-secondary) on the row, -8px padding horizontal (so border spans full width but bg is indented slightly).
-
-Write 7-8 REAL, specific FAQs for "${tokens.brandName}" (${tokens.siteType}) — cover pricing, getting started, integrations, security, cancellation, support. No generic questions.
-
-REQUIRED IMPORTS:
-import { useState } from 'react';
-import '../styles/tokens.css';
-Default export.
-Return ONLY the complete raw JSX file.`
+import { useState } from 'react'; import '../styles/tokens.css'; Default export.
+Return ONLY complete raw JSX file.`
     },
   };
 
-  // Pick up to 4 extra components: prefer requested ones, then fill with defaults
-  const defaultExtras = ['Features', 'Testimonials', 'CTA', 'Stats'];
+  // Determine which extras to generate
+  const requestedExtras = (tokens.components || []).filter(c => !['Header','Footer','Layout','Hero'].includes(c));
+  const defaultExtras   = ['Features', 'Testimonials', 'CTA', 'Stats'];
   const extrasToGenerate = [
     ...requestedExtras.filter(n => extraDefs[n]),
     ...defaultExtras.filter(n => !requestedExtras.includes(n)),
-  ]
-    .filter(n => extraDefs[n])
-    .slice(0, 4);
+  ].filter(n => extraDefs[n]).slice(0, 4);
 
   const extras = extrasToGenerate.map(name => ({
     name: `${name}.${ext}`, dir: compDir,
-    prompt: extraDefs[name].prompt(name),
+    prompt: extraDefs[name].prompt(),
   }));
 
   const files = {};
@@ -491,7 +636,6 @@ Return ONLY the complete raw JSX file.`
       files[filePath] = await generateSingleFile(comp.prompt, framework, ai, onLog);
     } catch (err) {
       console.error(`[pipeline] Failed ${filePath}:`, err.message);
-      // Output a valid stub component so imports don't crash the app
       files[filePath] = buildStubComponent(comp.name.replace(/\.\w+$/, ''), err.message);
     }
   }
@@ -500,7 +644,7 @@ Return ONLY the complete raw JSX file.`
 
 // ─── Step 3: Pages ────────────────────────────────────────────────────────────
 
-async function generatePages(tokens, components, siteData, framework, ai, onLog = () => {}) {
+async function generatePages(tokens, layout, components, siteData, framework, ai, onLog = () => {}) {
   const isReact = framework === 'react';
   const ext     = isReact ? 'jsx' : 'ts';
   const pageDir = isReact ? 'src/pages' : 'src/app/pages';
@@ -510,7 +654,7 @@ async function generatePages(tokens, components, siteData, framework, ai, onLog 
     .filter(k => k.includes('/components/') && !k.endsWith('.css'))
     .map(k => k.split('/').pop().replace(/\.\w+$/, ''));
 
-  const tokenCtx = buildTokenContext(tokens);
+  const tokenCtx = buildTokenContext(tokens, layout);
   const siteCtx  = buildSiteContext(siteData);
 
   // Single high-quality Home page — full token budget focused on one page
@@ -539,13 +683,14 @@ AVAILABLE COMPONENTS (import ALL relevant ones from '../components/X'):
 ${compNames.join(', ')}
 
 MANDATORY PAGE STRUCTURE — include EVERY section in this exact order:
-${buildPageStructure(pageName, compNames, tokens)}
+${buildPageStructure(pageName, compNames, tokens, layout)}
 
 DESIGN MISSION — this page must feel PREMIUM and UNIQUE:
-- Vary section backgrounds: alternate between var(--bg), var(--bg-secondary), and subtle gradient/pattern backgrounds
-- Add page-level micro-animations via CSS keyframes (fade-up on load, subtle float effects)
-- Use the brand's visual style (${tokens.visualStyle}) to guide section aesthetics
-- Each section should feel visually distinct — don't make them all look the same
+- Style archetype: ${tokens.styleArchetype || tokens.visualStyle || 'professional'} — let this drive every visual decision
+- Background rhythm: ${layout?.globalAnimations?.backgroundRhythm || 'alternate between var(--bg) and var(--bg-secondary)'}
+- Scroll animations: ${layout?.globalAnimations?.scrollTrigger || tokens.scrollAnimation || 'fade-up'} with ${layout?.globalAnimations?.stagger || '80ms'} stagger
+- Design notes: ${layout?.designNotes || 'Each section should feel visually distinct'}
+- Tone of voice: ${tokens.toneOfVoice || 'professional'} — reflect this in any inline text/labels
 - Use large, bold typography for section headings to create visual hierarchy
 
 CRITICAL STYLING RULES:
@@ -592,18 +737,35 @@ function buildPageComponents(pageName, available) {
   return all.slice(0, 3);
 }
 
-function buildPageStructure(pageName, available, tokens) {
+function buildPageStructure(pageName, available, tokens, layout = null) {
   const page = pageName.toLowerCase();
   const has = (c) => available.includes(c);
 
   if (page === 'home') {
-    const sections = ['<Hero /> — full viewport hero section'];
-    if (has('Stats')) sections.push('<Stats /> — impressive numbers row');
-    if (has('Features')) sections.push('<Features /> — 3-col feature grid');
-    if (has('Testimonials')) sections.push('<Testimonials /> — social proof');
-    if (has('Pricing')) sections.push('<Pricing /> — pricing cards');
-    if (has('CTA')) sections.push('<CTA /> — conversion section');
-    return sections.map((s, i) => `${i + 1}. ${s}`).join('\n');
+    // Use layout strategy section order if available
+    const sectionOrder = layout?.sectionOrder || ['Hero', 'Stats', 'Features', 'Testimonials', 'CTA'];
+    const sectionDescriptions = {
+      Hero:         '<Hero /> — full viewport hero section',
+      Stats:        '<Stats /> — impressive numbers row',
+      Features:     '<Features /> — feature showcase section',
+      Testimonials: '<Testimonials /> — social proof section',
+      Pricing:      '<Pricing /> — pricing cards',
+      CTA:          '<CTA /> — conversion/call-to-action section',
+    };
+    const sections = sectionOrder
+      .filter(s => s === 'Hero' || has(s))
+      .map(s => sectionDescriptions[s] || `<${s} />`);
+
+    // Append layout notes per section if available
+    const layoutAnnotated = sections.map((desc, i) => {
+      const compName = sectionOrder.filter(s => s === 'Hero' || has(s))[i];
+      const sectionLayout = layout?.sections?.[compName];
+      if (sectionLayout?.layoutType) {
+        return `${desc} [layout: ${sectionLayout.layoutType}${sectionLayout.cardStyle ? `, cards: ${sectionLayout.cardStyle}` : ''}]`;
+      }
+      return desc;
+    });
+    return layoutAnnotated.map((s, i) => `${i + 1}. ${s}`).join('\n');
   }
   if (page === 'about') {
     return `1. Hero-style banner with "About ${tokens.brandName}" heading (page-specific section, NOT <Hero />)
@@ -1074,32 +1236,52 @@ async function withRetry(fn, ai, onLog, label = 'call', retries = 3) {
 
 // ─── Context helpers ──────────────────────────────────────────────────────────
 
-function buildTokenContext(tokens) {
+function buildTokenContext(tokens, layout = null) {
   const angle = tokens.gradientAngle || '135deg';
   const grad = tokens.gradientStart && tokens.gradientEnd
     ? `linear-gradient(${angle}, ${tokens.gradientStart}, ${tokens.gradientEnd})`
     : `linear-gradient(${angle}, ${tokens.primaryColor || '#6366f1'}, ${tokens.accentColor || '#f59e0b'})`;
 
-  const style = tokens.visualStyle || 'modern-saas';
-  const mood  = tokens.animationMood || 'subtle';
-  const speed = tokens.transitionSpeed || '200ms';
+  const archetype = tokens.styleArchetype || tokens.visualStyle || 'gradient-saas';
+  const mood      = tokens.animationMood || 'subtle';
+  const speed     = tokens.transitionSpeed || '200ms';
+  const curve     = tokens.transitionCurve || 'cubic-bezier(0.4,0,0.2,1)';
 
-  // Style-specific design guidance
-  const styleGuide = {
-    'dark-tech':    'Dark backgrounds, vibrant accent glows, sharp edges, code-aesthetic.',
-    'glassmorphism':'backdrop-filter blur panels, frosted glass cards, luminous accents on dark/gradient bg.',
-    'editorial':    'Strong typographic hierarchy, generous white space, serif accents, minimal color.',
-    'brutalist':    'High contrast, raw borders, bold type, intentional roughness.',
-    'minimal':      'Maximum white space, almost no shadow, hairline borders, muted palette.',
-    'creative':     'Expressive gradients, asymmetric layouts, bold display fonts, vivid colors.',
-    'enterprise':   'Conservative palette, dense information layout, trust-building neutrals.',
-    'modern-saas':  'Clean white space, subtle card shadows, rounded corners, clear CTA hierarchy.',
-  }[style] || 'Clean, professional, modern SaaS aesthetic.';
+  // Archetype-specific design guidance
+  const archetypeGuide = {
+    'glassmorphism':    'backdrop-filter: blur(16px) panels, frosted glass cards, luminous accents on dark/gradient backgrounds. Think Apple Vision Pro UI.',
+    'brutalism':        'Raw borders, bold stark typography, high contrast, intentional roughness. No gradients. Monochrome + one accent. Grid-heavy.',
+    'neo-banking':      'Ultra-clean white space, precision grid, trust-first palette, no decorative elements. Data lives center stage. Think Mercury or Stripe.',
+    'editorial-luxury': 'Strong typographic hierarchy, generous white space, serif heading font, restrained palette. Think NYT or Loewe.com.',
+    'playful-startup':  'Rounded everything (radius-full), bright accent colors, friendly conversational tone, organic blob shapes. Think Notion or Linear.',
+    'tech-futuristic':  'Dark mode first, subtle grid overlays, neon or electric accents, terminal/mono aesthetic. Think Vercel or Railway.',
+    'minimal-swiss':    'Grid-based, white space as primary design element, muted palette, typographic focus. No decorative elements. Think Swiss posters.',
+    'gradient-saas':    'Vibrant mesh gradients, feature-rich layouts, conversion-optimized hierarchy. Bold gradient CTAs. Think Framer or Webflow.',
+  }[archetype] || 'Clean, professional aesthetic with clear visual hierarchy.';
 
-  return `DESIGN TOKENS:
-Brand: ${tokens.brandName} | Type: ${tokens.siteType} | Style: ${style} | Dark: ${tokens.darkMode || false}
-Visual guidance: ${styleGuide}
-Animation: ${mood} (transition: ${speed} ease) | Density: ${tokens.density || 'comfortable'}
+  const layoutNotes = layout ? `\nLAYOUT STRATEGY:
+Section composition: ${(layout.sectionOrder || []).join(' → ')}
+Animations: ${layout.globalAnimations || 'fade-up'}
+Design notes: ${layout.designNotes || ''}` : '';
+
+  const cd = tokens.creativeDirection || {};
+  const creativeNotes = cd.designConcept ? `\nCREATIVE DIRECTION:
+Concept: ${cd.designConcept}
+Motif: ${cd.visualMotif || ''}
+Energy: ${cd.layoutEnergy || 'balanced'} | Density: ${cd.density || 'balanced'}
+Avoid: ${(cd.doNotDo || []).join(' · ')}
+Must include: ${(cd.mustHaveMoments || []).join(' · ')}` : '';
+
+  return `BRAND IDENTITY:
+Name: ${tokens.brandName} | Type: ${tokens.siteType} | Personality: ${tokens.brandPersonality || 'professional'}
+Audience: ${tokens.targetAudience || 'general'} | Positioning: ${tokens.pricePositioning || 'mid'}
+Tone of voice: ${tokens.toneOfVoice || 'professional'} | Headline style: ${tokens.headlineStyle || 'clear'}
+CTA language: "${tokens.ctaLanguage || 'Get Started'}"
+
+STYLE ARCHETYPE: ${archetype}
+Design direction: ${archetypeGuide}
+Animation: ${mood} | Transition: ${speed} ${curve} | Scroll: ${tokens.scrollAnimation || 'fade-up'}
+Dark mode: ${tokens.darkMode || false}${layoutNotes}${creativeNotes}
 
 COLORS:
 Primary: ${tokens.primaryColor} | Secondary: ${tokens.secondaryColor} | Accent: ${tokens.accentColor}
@@ -1191,29 +1373,29 @@ function buildReactBoilerplate(tokens, siteData, pages) {
     'src/styles/global.css': readTemplate('react', 'src/styles/global.css'),
 
     'src/styles/tokens.css': readTemplate('react', 'src/styles/tokens.css')
-      .replace('{{PRIMARY_COLOR}}',    tokens.primaryColor   || '#6366f1')
-      .replace('{{SECONDARY_COLOR}}',  tokens.secondaryColor || '#818cf8')
-      .replace('{{ACCENT_COLOR}}',     tokens.accentColor    || '#f59e0b')
-      .replace('{{BG_COLOR}}',         tokens.bgColor        || '#ffffff')
-      .replace('{{BG_SECONDARY}}',     tokens.bgSecondary    || '#f8fafc')
-      .replace('{{TEXT_COLOR}}',       tokens.textColor      || '#111827')
-      .replace('{{TEXT_MUTED}}',       tokens.textMuted      || '#6b7280')
-      .replace('{{BORDER_COLOR}}',     tokens.borderColor    || '#e5e7eb')
-      .replace('{{FONT_HEADING}}',     `'${tokens.fontHeading || 'Inter'}', sans-serif`)
-      .replace('{{FONT_BODY}}',        `'${tokens.fontBody    || 'Inter'}', sans-serif`)
-      .replace('{{FONT_MONO}}',        `'${tokens.fontMono    || 'JetBrains Mono'}', monospace`)
-      .replace('{{FONT_BASE}}',        tokens.baseFontSize   || '16px')
-      .replace('{{BORDER_RADIUS}}',    radius)
-      .replace('{{BORDER_RADIUS_LG}}', `calc(${radius} * 2)`)
-      .replace('{{SPACING}}',          tokens.spacing        || '1.5rem')
-      .replace('{{BOX_SHADOW}}',       tokens.boxShadow      || '0 2px 16px rgba(0,0,0,0.08)')
-      .replace('{{GRADIENT_START}}',   gradStart)
-      .replace('{{GRADIENT_END}}',     gradEnd)
-      .replace('{{PRIMARY_RGB}}',      primaryRGB)
-      .replace('{{ACCENT_RGB}}',       accentRGB)
-      .replace('{{BG_RGB}}',           hexToRGB(tokens.bgColor        || '#ffffff'))
-      .replace('{{SECONDARY_RGB}}',    hexToRGB(tokens.secondaryColor || '#818cf8'))
-      .replace('{{BORDER_RGB}}',       hexToRGB(tokens.borderColor    || '#e5e7eb')),
+      .replaceAll('{{PRIMARY_COLOR}}',    tokens.primaryColor   || '#6366f1')
+      .replaceAll('{{SECONDARY_COLOR}}',  tokens.secondaryColor || '#818cf8')
+      .replaceAll('{{ACCENT_COLOR}}',     tokens.accentColor    || '#f59e0b')
+      .replaceAll('{{BG_COLOR}}',         tokens.bgColor        || '#ffffff')
+      .replaceAll('{{BG_SECONDARY}}',     tokens.bgSecondary    || '#f8fafc')
+      .replaceAll('{{TEXT_COLOR}}',       tokens.textColor      || '#111827')
+      .replaceAll('{{TEXT_MUTED}}',       tokens.textMuted      || '#6b7280')
+      .replaceAll('{{BORDER_COLOR}}',     tokens.borderColor    || '#e5e7eb')
+      .replaceAll('{{FONT_HEADING}}',     `'${tokens.fontHeading || 'Inter'}', sans-serif`)
+      .replaceAll('{{FONT_BODY}}',        `'${tokens.fontBody    || 'Inter'}', sans-serif`)
+      .replaceAll('{{FONT_MONO}}',        `'${tokens.fontMono    || 'JetBrains Mono'}', monospace`)
+      .replaceAll('{{FONT_BASE}}',        tokens.baseFontSize   || '16px')
+      .replaceAll('{{BORDER_RADIUS}}',    radius)
+      .replaceAll('{{BORDER_RADIUS_LG}}', `calc(${radius} * 2)`)
+      .replaceAll('{{SPACING}}',          tokens.spacing        || '1.5rem')
+      .replaceAll('{{BOX_SHADOW}}',       tokens.boxShadow      || '0 2px 16px rgba(0,0,0,0.08)')
+      .replaceAll('{{GRADIENT_START}}',   gradStart)
+      .replaceAll('{{GRADIENT_END}}',     gradEnd)
+      .replaceAll('{{PRIMARY_RGB}}',      primaryRGB)
+      .replaceAll('{{ACCENT_RGB}}',       accentRGB)
+      .replaceAll('{{BG_RGB}}',           hexToRGB(tokens.bgColor        || '#ffffff'))
+      .replaceAll('{{SECONDARY_RGB}}',    hexToRGB(tokens.secondaryColor || '#818cf8'))
+      .replaceAll('{{BORDER_RGB}}',       hexToRGB(tokens.borderColor    || '#e5e7eb')),
   };
 }
 

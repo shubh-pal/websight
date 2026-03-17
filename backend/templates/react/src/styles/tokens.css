@@ -12,6 +12,7 @@
   /* Text */
   --text:         {{TEXT_COLOR}};
   --text-muted:   {{TEXT_MUTED}};
+  --muted:        {{TEXT_MUTED}};   /* alias used by some components */
 
   /* Borders */
   --border:       {{BORDER_COLOR}};
@@ -26,6 +27,7 @@
   --radius:       {{BORDER_RADIUS}};
   --radius-lg:    {{BORDER_RADIUS_LG}};
   --radius-full:  9999px;
+  --radius-pill:  9999px;   /* alias used by some components */
 
   /* Spacing */
   --spacing:      {{SPACING}};
