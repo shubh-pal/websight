@@ -3,7 +3,7 @@ const path = require('path');
 const { createAIClient } = require('./aiClient');
 
 /**
- * Master pipeline: analyze → components → pages → boilerplate
+ * Master pipeline: analyze → creativeDirection → scenePlan → components → pages → boilerplate
  * model: 'gemini-2.5-flash' | 'claude-opus-4-5' | etc.
  */
 async function generateRedesign(siteData, framework = 'react', onProgress = () => {}, model = 'claude-opus-4-5') {
@@ -13,17 +13,21 @@ async function generateRedesign(siteData, framework = 'react', onProgress = () =
   const tokens = await analyzeAndTokenize(siteData, ai, (msg) => onProgress(1, msg));
   onProgress(1, `Brand analyzed — ${tokens.brandName} · ${tokens.styleArchetype || tokens.siteType} · ${tokens.brandPersonality || ''}`);
 
-  onProgress(2, 'Creating layout strategy…');
-  const layout = await generateLayoutStrategy(tokens, siteData, ai, (msg) => onProgress(2, msg));
-  onProgress(2, `Layout — ${layout.sectionOrder.join(' → ')} | ${layout.designNotes || 'custom composition'}`);
+  onProgress(2, 'Generating creative direction…');
+  const creativeDirection = await generateCreativeDirection(tokens, siteData, ai, (msg) => onProgress(2, msg));
+  onProgress(2, `Creative direction — ${(creativeDirection.designConcept || '').slice(0, 70)}…`);
 
-  onProgress(3, 'Generating shared components…');
-  const components = await generateComponents(tokens, layout, siteData, framework, ai, (msg) => onProgress(3, msg));
+  onProgress(3, 'Planning page scenes…');
+  const scenePlan = await generateScenePlan(tokens, creativeDirection, ai, (msg) => onProgress(3, msg));
+  onProgress(3, `Scenes — ${(scenePlan.scenes || []).map(s => s.name).join(' → ')}`);
 
-  onProgress(4, 'Generating pages…');
-  const pages = await generatePages(tokens, layout, components, siteData, framework, ai, (msg) => onProgress(4, msg));
+  onProgress(4, 'Generating shared components…');
+  const components = await generateComponents(tokens, creativeDirection, scenePlan, siteData, framework, ai, (msg) => onProgress(4, msg));
 
-  onProgress(5, 'Assembling project boilerplate…');
+  onProgress(5, 'Generating pages…');
+  const pages = await generatePages(tokens, creativeDirection, scenePlan, components, siteData, framework, ai, (msg) => onProgress(5, msg));
+
+  onProgress(6, 'Assembling project boilerplate…');
   const boilerplate = buildBoilerplate(tokens, siteData, framework, pages);
 
   // Post-process: lift all <style>{`...`}</style> blocks out of JSX → global.css
@@ -33,7 +37,13 @@ async function generateRedesign(siteData, framework = 'react', onProgress = () =
   files = extractInlineCssToGlobal(files);
   files = sanitizeTokensCss(files);
 
-  return { tokens, files };
+  // Post-generation design quality validation
+  const evaluation = evaluateDesign(files, tokens, scenePlan);
+  if (evaluation.score < 6) {
+    onProgress(6, `⚠ Design score ${evaluation.score}/10 — ${evaluation.issues.slice(0, 2).join(', ')}`);
+  }
+
+  return { tokens, creativeDirection, scenePlan, evaluation, files };
 }
 
 // ─── Step 1: Design Tokens ────────────────────────────────────────────────────
@@ -208,54 +218,58 @@ Return ONLY this JSON (no markdown, no backticks, all fields filled):
   }, ai, onLog, 'tokenize');
 }
 
-// ─── Step 1b: Layout Strategy ─────────────────────────────────────────────────
-// Determines unique section order + layout types per section for this brand.
-// This is what prevents every site from looking like the same SaaS template.
+// ─── Step 1b: Creative Direction ──────────────────────────────────────────────
+// Generates a rich, opinionated creative brief unique to this brand.
+// Expands on the basic creativeDirection seeded in analyzeAndTokenize.
 
-async function generateLayoutStrategy(tokens, siteData, ai, onLog = () => {}) {
-  const system = `You are an award-winning creative director designing unique landing pages.
+async function generateCreativeDirection(tokens, siteData, ai, onLog = () => {}) {
+  const system = `You are an avant-garde creative director who designs websites that win awards and stop people mid-scroll.
+You REJECT safe, templated thinking. Every output must feel designed for THIS brand specifically.
 Return ONLY valid JSON. No markdown. No explanation.`;
 
+  const existing  = tokens.creativeDirection || {};
   const archetype = tokens.styleArchetype || 'gradient-saas';
-  const strategy  = tokens.componentStrategy || {};
-  const comps     = (tokens.components || ['Features','Testimonials','CTA','Stats']);
 
-  const user = `Create a unique layout composition for "${tokens.brandName}" (${tokens.siteType}).
+  const designTensions = [
+    'minimal vs expressive', 'structured vs organic', 'calm vs energetic',
+    'precise vs fluid', 'restrained vs bold', 'dark vs luminous',
+    'serious vs playful', 'corporate vs avant-garde',
+  ];
+  const assignedTension = designTensions[Math.floor(Math.random() * designTensions.length)];
 
-Brand personality: ${tokens.brandPersonality}
-Style archetype: ${archetype}
-Target audience: ${tokens.targetAudience}
-Tone of voice: ${tokens.toneOfVoice}
-Component strategy: ${JSON.stringify(strategy)}
-Available sections: ${comps.join(', ')}
+  const user = `Create a deep, opinionated creative direction for "${tokens.brandName}" (${tokens.siteType}).
 
-DO NOT use a generic fixed order. Design a page flow that tells THIS brand's specific story.
+Brand intelligence:
+- Personality: ${tokens.brandPersonality} | Audience: ${tokens.targetAudience}
+- Positioning: ${tokens.pricePositioning} | Visual maturity: ${tokens.visualMaturity}
+- Style archetype: ${archetype} | Tone: ${tokens.toneOfVoice}
 
-🔥 HARD RULES — these override everything else:
-1. This layout MUST NOT resemble a standard SaaS landing page template (Hero → Features → Pricing → CTA is banned)
-2. At least ONE section must be visually unconventional — asymmetric, editorial, broken-grid, or full-bleed immersive
-3. NEVER use the same layout type for two consecutive sections
-4. Introduce at least ONE density contrast: a dense/information-rich section immediately followed by an airy/spacious one
-5. Section ORDER must serve brand narrative — credibility brands lead with Stats, product-led with Features, trust-driven surface Testimonials early
-6. Background rhythm MUST alternate meaningfully — not just light/light/light. Use dark sections to create drama.
+Existing creative seed (EXPAND and make MORE specific — do NOT be generic):
+${existing.designConcept  ? `Concept: ${existing.designConcept}`                     : ''}
+${existing.visualMotif    ? `Motif: ${existing.visualMotif}`                          : ''}
+${existing.mustHaveMoments?.length ? `Must-haves: ${existing.mustHaveMoments.join(', ')}` : ''}
 
-Creative direction to apply:
-${tokens.creativeDirection?.designConcept ? `Concept: ${tokens.creativeDirection.designConcept}` : ''}
-${tokens.creativeDirection?.mustHaveMoments?.length ? `Must-have moments: ${tokens.creativeDirection.mustHaveMoments.join(' · ')}` : ''}
-${tokens.creativeDirection?.doNotDo?.length ? `Avoid: ${tokens.creativeDirection.doNotDo.join(' · ')}` : ''}
+Design tension to explore: "${assignedTension}"
 
-Return JSON (only sections from available list + Hero):
+Site content hints:
+Title: ${siteData.title}
+Description: ${(siteData.description || '').slice(0, 200)}
+Top headings: ${JSON.stringify((siteData.headings || []).slice(0, 5))}
+
+Return ONLY this JSON:
 {
-  "sectionOrder": ["Hero", "Stats", "Features", "Testimonials", "CTA"],
-  "sections": {
-    "Hero": { "layout": "centered|split-left|split-right|asymmetric|immersive|editorial", "bg": "gradient|dark|light|pattern", "visual": "blobs|grid|illustration|product-ui|minimal" },
-    "Features": { "layout": "3-col-grid|bento-grid|alternating-rows|timeline|2-col-asymmetric", "bg": "light|dark|secondary|accent-tint", "cardStyle": "bordered|elevated|flat|gradient-border" },
-    "Stats": { "layout": "4-col-dividers|2x2-grid|horizontal-banner", "bg": "dark|primary|light|secondary", "style": "minimal-numbers|icon-led|gradient-text" },
-    "Testimonials": { "layout": "3-col|masonry|featured-center|single-large", "bg": "light|secondary|dark" },
-    "CTA": { "layout": "centered-gradient|split-dark|full-bleed|minimal-border", "bg": "gradient|dark|primary|accent" }
-  },
-  "globalAnimations": "fade-up|slide-in|scale-in|none",
-  "designNotes": "One sentence of creative direction specific to this brand"
+  "designConcept": "One powerful sentence — the core visual and emotional idea driving this entire design",
+  "visualMotif": "A specific, repeatable visual element woven throughout every section (e.g. 'thin diagonal rule lines echoing legal precision', 'glowing amber edge accents', 'typographic weight contrast between serif and grotesque')",
+  "layoutEnergy": "calm|balanced|dynamic|experimental",
+  "density": "airy|balanced|dense",
+  "uniquenessScore": "low|medium|high|very-high",
+  "designTension": "${assignedTension}",
+  "doNotDo": ["specific thing to avoid #1", "specific thing to avoid #2", "specific thing to avoid #3"],
+  "mustHaveMoments": ["specific standout moment #1", "specific standout moment #2", "specific standout moment #3"],
+  "heroMood": "One sentence describing the exact emotional feeling the hero should evoke",
+  "colorApplication": "How colors should be applied — which dominates, where accent appears, dark/light rhythm",
+  "typographyExpression": "How typography should be used expressively — size contrasts, weight play, mixed fonts",
+  "spacingPhilosophy": "How space is used as a design tool — tight vs generous, rhythm, breathing room"
 }`;
 
   try {
@@ -263,73 +277,174 @@ Return JSON (only sections from available list + Hero):
       const raw = (await ai.complete(system, user, 2048, { isJson: true })).trim()
         .replace(/^```json?\n?/, '').replace(/\n?```$/, '');
       return JSON.parse(raw);
-    }, ai, onLog, 'layout-strategy');
+    }, ai, onLog, 'creative-direction');
   } catch (err) {
-    console.warn('[generateLayoutStrategy] Failed, using defaults:', err.message);
-    // Sensible defaults so the pipeline never crashes
+    console.warn('[generateCreativeDirection] Failed, using tokens seed:', err.message);
     return {
-      sectionOrder: ['Hero', ...comps.filter(c => c !== 'Hero')],
-      sections: {
-        Hero:         { layout: strategy.hero?.layout         || 'centered',           bg: 'gradient',   visual: strategy.hero?.visual || 'blobs' },
-        Features:     { layout: strategy.features?.layout     || '3-col-grid',         bg: 'light',      cardStyle: strategy.features?.cardStyle || 'bordered' },
-        Stats:        { layout: strategy.stats?.layout        || '4-col-dividers',     bg: 'secondary',  style: strategy.stats?.style || 'icon-led' },
-        Testimonials: { layout: strategy.testimonials?.layout || 'featured-center',    bg: 'light' },
-        CTA:          { layout: strategy.cta?.layout          || 'centered-gradient',  bg: 'gradient' },
-      },
-      globalAnimations: tokens.scrollAnimation || 'fade-up',
-      designNotes: '',
+      ...existing,
+      designTension:        assignedTension,
+      heroMood:             `A premium ${archetype} experience communicating ${tokens.brandPersonality} authority`,
+      colorApplication:     `${tokens.primaryColor} as dominant, ${tokens.accentColor} as conversion accent`,
+      typographyExpression: `${tokens.fontHeading} at high weight with generous scale contrast`,
+      spacingPhilosophy:    'Balanced rhythm with generous section padding and tight component spacing',
+    };
+  }
+}
+
+// ─── Step 1c: Scene Plan ───────────────────────────────────────────────────────
+// Replaces generateLayoutStrategy — produces a cinematic scene-by-scene plan
+// that drives component generation and page assembly order.
+
+async function generateScenePlan(tokens, creativeDirection, ai, onLog = () => {}) {
+  const system = `You are a master narrative designer who builds website experiences like film directors build scenes.
+Each section of the page is a "scene" with a specific goal, mood, and visual approach.
+Return ONLY valid JSON. No markdown. No explanation.`;
+
+  const comps     = tokens.components || ['Features', 'Testimonials', 'CTA', 'Stats'];
+  const archetype = tokens.styleArchetype || 'gradient-saas';
+
+  const user = `Design a cinematic scene plan for "${tokens.brandName}" (${tokens.siteType}).
+
+Creative direction:
+Concept: ${creativeDirection.designConcept}
+Visual motif: ${creativeDirection.visualMotif}
+Design tension: ${creativeDirection.designTension}
+Layout energy: ${creativeDirection.layoutEnergy} | Density: ${creativeDirection.density}
+Must-have moments: ${(creativeDirection.mustHaveMoments || []).join(' · ')}
+Avoid: ${(creativeDirection.doNotDo || []).join(' · ')}
+Hero mood: ${creativeDirection.heroMood || ''}
+
+Available component types: Hero (always scene 1), ${comps.join(', ')}
+Style archetype: ${archetype}
+Brand: ${tokens.brandPersonality} targeting ${tokens.targetAudience}
+
+SCENE DESIGN RULES:
+1. Design 4–6 scenes total. Hero is always scene 1. Use ALL available component types.
+2. Each scene must have a DISTINCT visual treatment — no two scenes can feel the same.
+3. Alternate density: dense scene MUST be followed by airy scene.
+4. At least ONE scene must be visually unconventional (not a standard layout).
+5. Background rhythm creates drama — not all light, not all dark.
+6. Sequence tells a story: hook → proof → emotion → conversion.
+
+Layout options per component:
+- Hero: centered | split-left | split-right | asymmetric | immersive | editorial
+- Features: 3-col-grid | bento-grid | alternating-rows | timeline | 2-col-asymmetric
+- Stats: 4-col-dividers | 2x2-grid | horizontal-banner
+- Testimonials: 3-col | masonry | featured-center | single-large
+- CTA: centered-gradient | split-dark | full-bleed | minimal-border
+
+Return ONLY this JSON:
+{
+  "scenes": [
+    {
+      "name": "Hero",
+      "componentType": "Hero",
+      "goal": "Hook visitor immediately — establish brand identity in 3 seconds",
+      "layout": "asymmetric",
+      "visualHook": "The single most striking visual element in this scene",
+      "interaction": "How users interact or are drawn in (scroll cue, animated element, etc.)",
+      "density": "airy",
+      "background": "gradient|dark|light|pattern|image-overlay|primary",
+      "twist": "One unconventional design decision that makes this scene memorable"
+    }
+  ],
+  "pageNarrative": "One sentence describing the emotional arc of the full page",
+  "transitionStyle": "How sections connect visually (e.g. 'diagonal cuts', 'wave dividers', 'hard color blocks', 'seamless gradient flow')"
+}`;
+
+  try {
+    return await withRetry(async () => {
+      const raw = (await ai.complete(system, user, 2048, { isJson: true })).trim()
+        .replace(/^```json?\n?/, '').replace(/\n?```$/, '');
+      const parsed = JSON.parse(raw);
+      if (!parsed.scenes?.length) throw new Error('No scenes returned');
+      // Ensure Hero is always first
+      if (parsed.scenes[0]?.componentType !== 'Hero') {
+        parsed.scenes.unshift({
+          name: 'Hero', componentType: 'Hero',
+          goal: 'Establish brand identity and hook the visitor',
+          layout: 'centered', visualHook: 'Large typographic statement',
+          interaction: 'Scroll indicator', density: 'airy',
+          background: 'gradient', twist: 'Gradient text headline',
+        });
+      }
+      return parsed;
+    }, ai, onLog, 'scene-plan');
+  } catch (err) {
+    console.warn('[generateScenePlan] Failed, using default scene plan:', err.message);
+    const strategy = tokens.componentStrategy || {};
+    const defaultScenes = [
+      { name: 'Hero',         componentType: 'Hero',         goal: 'Hook visitor and establish brand',    layout: strategy.hero?.layout         || 'centered',         visualHook: 'Bold gradient headline with social proof',         interaction: 'Scroll cue',            density: 'airy',    background: 'gradient', twist: 'Oversized gradient headline text' },
+      { name: 'Stats',        componentType: 'Stats',        goal: 'Establish instant credibility',       layout: strategy.stats?.layout        || '4-col-dividers',   visualHook: 'Large animated numbers',                           interaction: 'Count-up animation',    density: 'dense',   background: 'dark',     twist: 'Dark band contrasting with light sections' },
+      { name: 'Features',     componentType: 'Features',     goal: 'Demonstrate value and capability',    layout: strategy.features?.layout     || '3-col-grid',       visualHook: 'Icon-led feature cards with gradient accents',     interaction: 'Hover lift effect',     density: 'balanced',background: 'light',    twist: 'One dominant featured card breaking the grid' },
+      { name: 'Testimonials', componentType: 'Testimonials', goal: 'Build trust through social proof',    layout: strategy.testimonials?.layout || 'featured-center',  visualHook: 'Featured center card with brand color accent border',interaction: 'Hover reveal detail',   density: 'airy',    background: 'secondary',twist: 'Featured testimonial at 1.04x scale' },
+      { name: 'CTA',          componentType: 'CTA',          goal: 'Drive conversion — final impression', layout: strategy.cta?.layout          || 'centered-gradient', visualHook: 'Full-bleed gradient with floating decorative blobs', interaction: 'Button glow on hover',   density: 'airy',    background: 'gradient', twist: 'Asymmetric blob shapes behind CTA content' },
+    ].filter(s => s.componentType === 'Hero' || comps.includes(s.componentType));
+    return {
+      scenes: defaultScenes,
+      pageNarrative: 'A compelling journey from brand discovery to conversion',
+      transitionStyle: 'seamless gradient flow',
     };
   }
 }
 
 // ─── Step 2: Components ───────────────────────────────────────────────────────
 
-async function generateComponents(tokens, layout, siteData, framework, ai, onLog = () => {}) {
+async function generateComponents(tokens, creativeDirection, scenePlan, siteData, framework, ai, onLog = () => {}) {
   const isReact = framework === 'react';
   const ext     = isReact ? 'jsx' : 'ts';
   const compDir = isReact ? 'src/components' : 'src/app/components';
-  const tokenCtx = buildTokenContext(tokens, layout);
+  const tokenCtx = buildTokenContext(tokens, creativeDirection);
   const siteCtx  = buildSiteContext(siteData);
   const navJson  = JSON.stringify((tokens.navLinks || []).slice(0, 5));
 
-  // Pull layout-strategy specifics with safe fallbacks
-  const heroLayout   = layout?.sections?.Hero?.layout         || 'centered';
-  const heroVisual   = layout?.sections?.Hero?.visual         || 'blobs';
-  const heroCtaStyle = tokens.componentStrategy?.hero?.ctaStyle || 'dual-button';
-  const featLayout   = layout?.sections?.Features?.layout     || '3-col-grid';
-  const featCard     = layout?.sections?.Features?.cardStyle  || 'bordered';
-  const testLayout   = layout?.sections?.Testimonials?.layout || 'featured-center';
-  const statsLayout  = layout?.sections?.Stats?.layout        || '4-col-dividers';
-  const statsStyle   = layout?.sections?.Stats?.style         || 'icon-led';
-  const ctaLayout    = layout?.sections?.CTA?.layout          || 'centered-gradient';
-  const archetype    = tokens.styleArchetype                   || 'gradient-saas';
-  const toneOfVoice  = tokens.toneOfVoice                     || 'professional';
-  const ctaLanguage  = tokens.ctaLanguage                     || 'Get Started';
+  // Extract per-component scene from scene plan (with fallbacks from componentStrategy)
+  const heroScene  = getSceneForComponent('Hero',         scenePlan);
+  const featScene  = getSceneForComponent('Features',     scenePlan);
+  const testScene  = getSceneForComponent('Testimonials', scenePlan);
+  const statsScene = getSceneForComponent('Stats',        scenePlan);
+  const ctaScene   = getSceneForComponent('CTA',          scenePlan);
 
-  // Creative direction fields
-  const cd              = tokens.creativeDirection || {};
-  const designConcept   = cd.designConcept    || '';
-  const visualMotif     = cd.visualMotif      || '';
-  const layoutEnergy    = cd.layoutEnergy     || 'balanced';
-  const density         = cd.density         || 'balanced';
-  const doNotDo         = (cd.doNotDo        || []).join(' · ');
-  const mustHave        = (cd.mustHaveMoments || []).join(' · ');
+  const strategy = tokens.componentStrategy || {};
 
-  // Controlled randomness: inject a design tension to push each generation in a slightly different direction
-  const designTensions  = ['minimal vs expressive', 'structured vs organic', 'calm vs energetic', 'precise vs fluid', 'restrained vs bold', 'dark vs luminous'];
-  const designTension   = designTensions[Math.floor(Math.random() * designTensions.length)];
+  // Derive layout types from scenes, falling back to componentStrategy
+  const heroLayout   = heroScene?.layout  || strategy.hero?.layout         || 'centered';
+  const heroVisual   = heroScene?.background === 'dark' ? 'abstract-grid' : (heroScene?.visualHook?.toLowerCase().includes('blob') ? 'blobs' : (strategy.hero?.visual || 'blobs'));
+  const heroCtaStyle = strategy.hero?.ctaStyle  || 'dual-button';
+  const featLayout   = featScene?.layout  || strategy.features?.layout     || '3-col-grid';
+  const featCard     = strategy.features?.cardStyle || 'bordered';
+  const testLayout   = testScene?.layout  || strategy.testimonials?.layout || 'featured-center';
+  const statsLayout  = statsScene?.layout || strategy.stats?.layout        || '4-col-dividers';
+  const statsStyle   = strategy.stats?.style    || 'icon-led';
+  const ctaLayout    = ctaScene?.layout   || strategy.cta?.layout          || 'centered-gradient';
+  const archetype    = tokens.styleArchetype                                || 'gradient-saas';
+  const toneOfVoice  = tokens.toneOfVoice                                  || 'professional';
+  const ctaLanguage  = tokens.ctaLanguage                                  || 'Get Started';
+
+  // Creative direction fields (from the rich standalone creativeDirection object)
+  const designConcept = creativeDirection.designConcept    || '';
+  const visualMotif   = creativeDirection.visualMotif      || '';
+  const layoutEnergy  = creativeDirection.layoutEnergy     || 'balanced';
+  const density       = creativeDirection.density          || 'balanced';
+  const doNotDo       = (creativeDirection.doNotDo         || []).join(' · ');
+  const mustHave      = (creativeDirection.mustHaveMoments || []).join(' · ');
+  const designTension = creativeDirection.designTension    || 'restrained vs bold';
 
   // Creative constraints block — injected into every component prompt
   const creativeBlock = `
 🎨 CREATIVE DIRECTION (follow strictly — this is what makes this site unique):
 Design concept: ${designConcept || `${archetype} aesthetic for ${tokens.brandPersonality} brand`}
-Visual motif: ${visualMotif || 'subtle brand-consistent visual theme'} — weave this throughout
-Layout energy: ${layoutEnergy} | Density: ${density}
-Design tension to explore: ${designTension}
+Visual motif: ${visualMotif || 'subtle brand-consistent visual theme'} — weave this throughout every element
+Layout energy: ${layoutEnergy} | Density: ${density} | Design tension: ${designTension}
 ${doNotDo   ? `AVOID: ${doNotDo}` : ''}
 ${mustHave  ? `MUST INCLUDE: ${mustHave}` : ''}
 
-🔥 GLOBAL DIRECTIVE: This component must feel crafted by a human designer with a strong opinion — not generated by AI. Make at least ONE unexpected visual decision that a generic template would never make.`;
+🔥 DESIGN OVERRIDE RULES — apply to EVERY component:
+- At least ONE element must break the grid or be positioned asymmetrically
+- Use layering: overlap elements, use z-index for depth, avoid flat same-plane layouts
+- Typography must vary dramatically in scale — giant headings next to fine print
+- At least ONE edge-to-edge full-bleed treatment in the section
+- This component must feel crafted by a human designer with a strong opinion — not generated by AI.`;
 
   // NOTE: tokens.css is NOT AI-generated — built deterministically in buildBoilerplate().
 
@@ -410,38 +525,45 @@ Return ONLY raw file. No markdown fences.`,
     },
     {
       name: `Hero.${ext}`, dir: compDir,
-      prompt: `Design a visually striking, non-generic Hero section for "${tokens.brandName}" that expresses the creativeDirection below. This MUST feel custom-designed for this brand — not reusable for any other site.
+      prompt: `Design a visually striking, non-generic Hero section for "${tokens.brandName}" that expresses the scene and creative direction below. This MUST feel custom-designed for this brand — not reusable for any other site.
 
 ${tokenCtx}
 ${siteCtx}
 ${creativeBlock}
+${buildSceneBlock(heroScene)}
 
 STYLING: <style>{\`...\`}</style> first, "hero-" prefixed classes, @media (max-width: 768px) + (max-width: 480px).
 
 LAYOUT TYPE: "${heroLayout}" — follow this strictly:
 ${heroLayout === 'split-left'    ? '- Split: text LEFT (max-width 520px), visual element RIGHT. Equal columns. Text left-aligned.' : ''}
 ${heroLayout === 'split-right'   ? '- Split: visual LEFT, text RIGHT (max-width 520px). Text left-aligned.' : ''}
-${heroLayout === 'asymmetric'    ? '- Asymmetric: 60/40 split. Intentional imbalance. Left-heavy text block, right decorative.' : ''}
+${heroLayout === 'asymmetric'    ? '- Asymmetric: 60/40 split. Intentional imbalance. Left-heavy text block, right decorative element.' : ''}
 ${heroLayout === 'immersive'     ? '- Full viewport immersive. Background IS the design. Content centered, overlaid. Dramatic.' : ''}
 ${heroLayout === 'editorial'     ? '- Editorial: large typographic statement. Minimal decoration. Grid-based alignment. Like NYT or Bloomberg.' : ''}
 ${heroLayout === 'centered'      ? '- Centered: text + CTAs centered. Visual elements as background/beneath content.' : ''}
 
-VISUAL: "${heroVisual}"
+BACKGROUND: "${heroScene?.background || 'gradient'}"
+${(heroScene?.background || '') === 'dark'            ? '- Dark section: deep black/near-black bg, white text, bright accent pops.' : ''}
+${(heroScene?.background || 'gradient') === 'gradient'? '- Gradient bg: var(--gradient), or custom CSS gradient from token colors.' : ''}
+${(heroScene?.background || '') === 'light'           ? '- Light bg: var(--bg), clean and airy.' : ''}
+${(heroScene?.background || '') === 'pattern'         ? '- Pattern bg: CSS radial-gradient dots or repeating line grid overlay.' : ''}
+
+VISUAL ELEMENT: ${heroScene?.visualHook || 'bold gradient headline with decorative background element'}
 ${heroVisual === 'blobs'         ? '- 2-3 blurred gradient blobs (position:absolute, filter:blur(80px), opacity:0.35, 300-600px circles)' : ''}
-${heroVisual === 'product-ui'    ? '- Mockup of product UI (use realistic placeholder divs styled as UI components — cards, graphs, etc.)' : ''}
 ${heroVisual === 'abstract-grid' ? '- Subtle CSS grid/dot pattern overlay + geometric line shapes' : ''}
 ${heroVisual === 'minimal'       ? '- Zero visual decoration. Typography IS the design. Maximum white space.' : ''}
-${heroVisual === 'pattern'       ? '- Repeating pattern background (CSS radial-gradient dots or lines)' : ''}
 
-CONTENT:
+HERO MOOD: ${creativeDirection.heroMood || `Premium ${archetype} feel — ${tokens.brandPersonality} and ${toneOfVoice}`}
+
+CONTENT (NO placeholders — write real brand copy):
 - Badge: pill with "✦ ${tokens.tagline || tokens.brandName}" — rgba(primary,0.1) bg, border, border-radius 9999px
-- Headline: clamp(3rem, 7vw, 5.5rem), weight 800-900, tracking -0.04em, line-height 1.05. Match "${tokens.headlineStyle}" style. Max 10 words.
-- Subheadline: clamp(1rem, 2vw, 1.25rem), line-height 1.7, max-width 560px, var(--text-muted)
+- Headline: clamp(3rem, 7vw, 5.5rem), weight 800-900, tracking -0.04em, line-height 1.05. Match "${tokens.headlineStyle}" style. Max 10 words. Must NOT sound generic SaaS.
+- Subheadline: clamp(1rem, 2vw, 1.25rem), line-height 1.7, max-width 560px, var(--text-muted). Real brand description.
 - CTAs (${heroCtaStyle}): primary="${ctaLanguage}" (--primary bg), secondary="Learn More" (bordered). Hover: translateY(-2px) scale(1.02), glow
-- Social proof row: stars + trust signals relevant to "${tokens.brandName}" audience: "${tokens.targetAudience}"
-- Real content: brand="${tokens.brandName}", desc="${siteData.description || ''}"
+- Social proof row: stars + trust signals specific to "${tokens.targetAudience}"
+- Brand: "${tokens.brandName}", desc: "${siteData.description || ''}"
 
-TONE: ${toneOfVoice}. Headline must NOT sound generic SaaS. Write as a ${tokens.brandPersonality} brand.
+TONE: ${toneOfVoice}. Write as a ${tokens.brandPersonality} brand — not a generic tech startup.
 
 REQUIRED IMPORTS:
 import { useEffect, useRef } from 'react';
@@ -459,30 +581,35 @@ Return ONLY raw file from imports. No markdown fences.`,
 ${tokenCtx}
 ${siteCtx}
 ${creativeBlock}
+${buildSceneBlock(featScene)}
 
 STYLING: <style>{\`...\`}</style> with "feat-" prefixed classes. @media (max-width: 768px) + (max-width: 480px).
 
+BACKGROUND: "${featScene?.background || 'light'}" section.
+DENSITY: "${featScene?.density || 'balanced'}" — ${featScene?.density === 'dense' ? 'pack in more information, tighter spacing, data-rich' : featScene?.density === 'airy' ? 'generous whitespace, breathe, calm' : 'balanced rhythm'}
+
 STRUCTURE RULES (override generic defaults):
-- DO NOT default to equal uniform cards — vary emphasis and hierarchy
-- At least ONE feature must be visually dominant (larger, different treatment)
-- Apply the visual motif "${visualMotif}" as a recurring accent element
+- DO NOT default to equal uniform cards — vary emphasis and visual hierarchy
+- At least ONE feature must be visually dominant (larger, different treatment, spans 2 columns)
+- Apply the visual motif "${visualMotif}" as a recurring accent element across cards
+- TWIST TO IMPLEMENT: "${featScene?.twist || 'One dominant oversized feature card'}"
 
 LAYOUT: "${featLayout}" — implement this layout type precisely:
-${featLayout === '3-col-grid'        ? '- 3-column equal grid → 2-col tablet → 1-col mobile. Uniform card heights.' : ''}
-${featLayout === 'bento-grid'        ? '- Bento grid: CSS grid with varying card sizes (1 large + 2 small + 1 medium + 2 small). Asymmetric but balanced.' : ''}
-${featLayout === 'alternating-rows'  ? '- Alternating rows: icon/text LEFT then RIGHT each row. 2-column, full-width rows. Generous spacing.' : ''}
-${featLayout === 'timeline'          ? '- Vertical timeline: center line, alternating left/right content blocks, connected dots.' : ''}
-${featLayout === '2-col-asymmetric'  ? '- 2-column asymmetric: left column 40% (large feature), right column 60% (2×2 smaller features).' : ''}
+${featLayout === '3-col-grid'        ? '- 3-column equal grid → 2-col tablet → 1-col mobile. Uniform card heights. But: first card spans 2 columns or is visually elevated.' : ''}
+${featLayout === 'bento-grid'        ? '- Bento grid: CSS grid with varying card sizes. One large (2×2), two medium (1×2), three small (1×1). Asymmetric but balanced. No two adjacent cells same size.' : ''}
+${featLayout === 'alternating-rows'  ? '- Alternating rows: icon/text LEFT then RIGHT each row. 2-column full-width rows. Large icon on one side, text on other. Generous spacing between rows.' : ''}
+${featLayout === 'timeline'          ? '- Vertical timeline: center line (2px, --gradient), alternating left/right content blocks, circle dot connector.' : ''}
+${featLayout === '2-col-asymmetric'  ? '- 2-column asymmetric: left 40% = one large dominant feature card, right 60% = 2×2 smaller feature cards.' : ''}
 
 CARD STYLE: "${featCard}"
-${featCard === 'bordered'        ? '- border: 1px solid var(--border), no shadow by default, hover: border-color rgba(primary,0.4), shadow-lg' : ''}
-${featCard === 'elevated'        ? '- box-shadow: var(--shadow-card), no border, hover: translateY(-6px), shadow-lg' : ''}
-${featCard === 'flat'            ? '- No border, no shadow. Background tint only. Hover: bg-secondary.' : ''}
-${featCard === 'gradient-border' ? '- Gradient border: use CSS background-clip trick or pseudo-element gradient border. Glows on hover.' : ''}
+${featCard === 'bordered'        ? '- border: 1px solid var(--border), hover: border-color rgba(var(--primary-rgb),0.4), box-shadow var(--shadow-lg)' : ''}
+${featCard === 'elevated'        ? '- box-shadow: 0 1px 3px rgba(0,0,0,.06), 0 8px 32px rgba(0,0,0,.08), hover: translateY(-6px), shadow-xl' : ''}
+${featCard === 'flat'            ? '- No border, no shadow. Background var(--bg-secondary) tint. Hover: brightness(0.97).' : ''}
+${featCard === 'gradient-border' ? '- Gradient border via ::before pseudo-element with var(--gradient) background. Glows on hover.' : ''}
 
-SECTION HEADER: Eyebrow ("WHY CHOOSE ${tokens.brandName.toUpperCase()}", letter-spacing 0.1em, --primary, 0.8rem) + heading clamp(2rem,4vw,3rem) + subtext max-width 560px.
-ICONS: 48×48 containers, rgba(primary,0.1) bg, 24×24 SVG (geometric, not emoji). Unique icon per feature.
-Write 6 REAL features for "${tokens.brandName}" audience: "${tokens.targetAudience}".
+SECTION HEADER: Eyebrow ("WHY CHOOSE ${tokens.brandName.toUpperCase()}", letter-spacing 0.1em, --primary, 0.8rem uppercase) + heading clamp(2rem,4vw,3rem) + subtext max-width 560px.
+ICONS: 48×48 containers, rgba(var(--primary-rgb),0.1) bg, 24×24 SVG paths (geometric, meaningful — NOT emoji). Each feature gets a UNIQUE icon.
+Write 6 REAL, specific features for "${tokens.brandName}" audience: "${tokens.targetAudience}".
 Tone: ${toneOfVoice}.
 
 Import '../styles/tokens.css'; Default export.
@@ -493,25 +620,30 @@ Return ONLY complete raw JSX file.`
       prompt: () => `Design a compelling Testimonials section for "${tokens.brandName}" that feels emotionally real — not like AI filler.
 ${tokenCtx}
 ${creativeBlock}
+${buildSceneBlock(testScene)}
 
 STYLING: <style>{\`...\`}</style> with "test-" prefixed classes. @media (max-width: 768px).
 
-CONTENT RULES (critical — generic testimonials ruin credibility):
-Each testimonial MUST include: (1) a specific scenario/context, (2) a measurable outcome or metric, (3) an emotional resonance authentic to "${tokens.targetAudience}"
+BACKGROUND: "${testScene?.background || 'secondary'}" — ${testScene?.background === 'dark' ? 'dark section, white text, light card treatments' : 'light/secondary bg for trust and openness'}
+DENSITY: "${testScene?.density || 'airy'}" — breathing room between testimonials
+TWIST: "${testScene?.twist || 'Featured center card with brand accent border'}" — implement this.
+
+CONTENT RULES (critical — generic testimonials destroy credibility):
+Each testimonial MUST include: (1) a specific scenario/context, (2) a measurable outcome or metric, (3) emotional resonance authentic to "${tokens.targetAudience}"
 NO generic phrases like "highly recommend" or "great experience" — write vivid, specific, believable quotes.
 
 LAYOUT: "${testLayout}"
 ${testLayout === '3-col'            ? '- 3 equal columns, uniform cards.' : ''}
-${testLayout === 'masonry'          ? '- Masonry/Pinterest layout: CSS columns:3, varying card heights, natural flow.' : ''}
-${testLayout === 'featured-center'  ? '- Center card larger/elevated (scale 1.04, featured border), flanked by 2 smaller cards.' : ''}
-${testLayout === 'single-large'     ? '- One large featured quote taking 2/3 width + 2 stacked smaller quotes on right.' : ''}
+${testLayout === 'masonry'          ? '- Masonry: CSS columns:3, vary card heights naturally. Staggered visual rhythm.' : ''}
+${testLayout === 'featured-center'  ? '- Center card larger/elevated (scale 1.04, --primary border), flanked by 2 smaller cards.' : ''}
+${testLayout === 'single-large'     ? '- One large featured quote at 2/3 width (large italic type, big quote mark) + 2 stacked smaller on right.' : ''}
 
-SECTION: bg var(--bg-secondary) or rgba(primary,0.03). Padding 96px 0. Eyebrow "TRUSTED BY LEADING ${tokens.siteType.toUpperCase()}S" + heading clamp(1.8rem,4vw,2.75rem).
+SECTION: bg varies per background type above. Padding 96px 0. Eyebrow "TRUSTED BY LEADING ${tokens.siteType.toUpperCase()}S" + heading clamp(1.8rem,4vw,2.75rem).
 
 CARDS: bg var(--bg), border 1px solid var(--border), border-radius var(--radius-lg), padding 32px.
-Hover: translateY(-5px), shadow-lg, border-color rgba(primary,0.25).
-Contents: ★★★★★ (#f59e0b) → large quote mark (opacity 0.2) → italic quote → divider → avatar (initials circle, --gradient bg) + name + role/company.
-Featured card: border-color var(--primary), box-shadow 0 0 0 1px var(--primary), 0 8px 40px rgba(primary-rgb, 0.15).
+Hover: translateY(-5px), shadow-lg, border-color rgba(var(--primary-rgb),0.25).
+Contents: ★★★★★ (#f59e0b stars) → large decorative quote mark (opacity 0.15, font-size 4rem) → italic quote text → horizontal rule → avatar (initials circle, --gradient bg) + name + role/company.
+Featured card: border: 2px solid var(--primary), box-shadow: 0 0 0 1px var(--primary), 0 8px 40px rgba(var(--primary-rgb),0.15).
 
 Write 3 vivid, SPECIFIC testimonials for "${tokens.brandName}" — real metrics, no generic praise.
 Tone: ${toneOfVoice}. Audience: "${tokens.targetAudience}".
@@ -521,25 +653,30 @@ Return ONLY complete raw JSX file.`
     },
 
     CTA: {
-      prompt: () => `Design an emotionally resonant, visually striking CTA section for "${tokens.brandName}" — this is the last impression. Make it memorable.
+      prompt: () => `Design an emotionally resonant, visually striking CTA section for "${tokens.brandName}" — this is the LAST IMPRESSION. Make it unforgettable.
 ${tokenCtx}
 ${creativeBlock}
+${buildSceneBlock(ctaScene)}
 
 STYLING: <style>{\`...\`}</style> with "cta-" prefixed classes.
 
-LAYOUT: "${ctaLayout}"
-${ctaLayout === 'centered-gradient' ? '- Full-width gradient bg (--gradient), content centered, max-width 640px. Decorative blobs.' : ''}
-${ctaLayout === 'split-dark'        ? '- 2-column split: left dark bg with large heading, right lighter with form or trust signals.' : ''}
-${ctaLayout === 'full-bleed'        ? '- Full-bleed: extreme padding 120px 0, immersive gradient, very large headline.' : ''}
-${ctaLayout === 'minimal-border'    ? '- Minimal: white bg, subtle border-radius container, refined typography, no gradient flash.' : ''}
+BACKGROUND: "${ctaScene?.background || 'gradient'}" — this is the final visual punch.
+DENSITY: "${ctaScene?.density || 'airy'}" — the CTA must breathe and command attention.
+TWIST: "${ctaScene?.twist || 'Asymmetric blob shapes behind content'}" — implement this.
 
-CONTENT (fit the "${toneOfVoice}" tone):
-- Eyebrow pill: rgba(white,0.15) bg, white border, brand-relevant label — NOT generic "Get Started Today"
-- Headline: clamp(2.2rem,5vw,3.5rem), weight 800, white, 2 lines max. Make it emotionally resonant for "${tokens.targetAudience}"
-- Subtext: rgba(255,255,255,0.8), 1.1rem, line-height 1.7
-- Primary CTA: "${ctaLanguage}" — white bg, var(--primary) text, hover scale(1.03)
-- Secondary CTA: transparent, white border, hover rgba(white,0.1)
-- Trust line: specific to "${tokens.brandName}" (not generic "No credit card required" unless relevant)
+LAYOUT: "${ctaLayout}"
+${ctaLayout === 'centered-gradient' ? '- Full-width gradient bg (var(--gradient)), content centered, max-width 640px. 2-3 decorative blobs (position:absolute, filter:blur(80px), opacity:0.2-0.4, 300-500px).' : ''}
+${ctaLayout === 'split-dark'        ? '- 2-column split: left dark panel with large headline, right lighter panel with input/trust signals.' : ''}
+${ctaLayout === 'full-bleed'        ? '- Full-bleed: extreme padding 120px 0, immersive gradient that spans edge-to-edge, very large headline.' : ''}
+${ctaLayout === 'minimal-border'    ? '- Minimal: var(--bg) bg, bordered container (border: 1px solid var(--border), border-radius var(--radius-lg)), refined typography, no gradients.' : ''}
+
+CONTENT (tone: "${toneOfVoice}" — NOT generic, NOT SaaS filler):
+- Eyebrow pill: rgba(255,255,255,0.15) bg, 1px white/primary border, brand-relevant label that fits "${tokens.brandName}"
+- Headline: clamp(2.2rem,5vw,3.5rem), weight 800, 2 lines max. Emotionally resonant for "${tokens.targetAudience}". Write as ${tokens.brandPersonality} brand.
+- Subtext: rgba(255,255,255,0.8) or var(--text-muted), 1.1rem, line-height 1.7, max-width 560px
+- Primary CTA: "${ctaLanguage}" — white/light bg, var(--primary) text, hover scale(1.03) with glow
+- Secondary CTA: transparent bg, border, hover rgba(white,0.1)
+- Trust line: specific, credible signal for "${tokens.brandName}" — NOT generic "No credit card required" unless truly relevant
 
 Import '../styles/tokens.css'; Default export.
 Return ONLY complete raw JSX file.`
@@ -549,31 +686,36 @@ Return ONLY complete raw JSX file.`
       prompt: () => `Design a Stats section for "${tokens.brandName}" that makes numbers feel like a story — not a uniform data table.
 ${tokenCtx}
 ${creativeBlock}
+${buildSceneBlock(statsScene)}
 
 STYLING: <style>{\`...\`}</style> with "stat-" prefixed classes. @media (max-width: 768px).
 
-HIERARCHY RULES:
+BACKGROUND: "${statsScene?.background || 'dark'}" — ${statsScene?.background === 'dark' ? 'dark band creates dramatic contrast, white numbers pop' : statsScene?.background === 'primary' ? 'brand primary color bg, white text for strong visual identity' : 'light section, primary-colored numbers'}
+DENSITY: "${statsScene?.density || 'dense'}" — pack in the credibility signals
+TWIST: "${statsScene?.twist || 'Dark band contrasting with light sections'}" — implement this.
+
+HIERARCHY RULES (numbers as storytelling):
 - Stats MUST NOT be uniform blocks of equal visual weight
-- Use hierarchy: 1 hero stat (largest, most impactful) + supporting stats
-- Add contextual micro-labels below each number (story-driven, not just unit labels)
-- Apply visual motif "${visualMotif}" as a subtle accent in this section
+- 1 hero stat (largest, most impactful number) + 3 supporting stats
+- Each number gets a contextual micro-label beneath it (story-driven, e.g. "spanning 7 offices" not just "offices")
+- Apply visual motif "${visualMotif}" as a subtle accent
 
 LAYOUT: "${statsLayout}"
-${statsLayout === '4-col-dividers'   ? '- 4 equal columns, 1px var(--border) dividers between cells (border-right trick). Padding 48px 32px each.' : ''}
-${statsLayout === '2x2-grid'         ? '- 2×2 grid with gap 24px. Each cell is a card with border-radius var(--radius-lg).' : ''}
-${statsLayout === 'horizontal-banner'? '- Single horizontal row, full-width, stats inline. bg var(--primary) or dark. White text.' : ''}
+${statsLayout === '4-col-dividers'   ? '- 4 equal columns, 1px var(--border) dividers between cells (border-right trick, last has none). Padding 48px 32px each cell.' : ''}
+${statsLayout === '2x2-grid'         ? '- 2×2 grid with gap 24px. Each cell: card with border-radius var(--radius-lg). First cell larger/featured.' : ''}
+${statsLayout === 'horizontal-banner'? '- Single horizontal row, full-width. Stats inline with dividers. Dense, impactful band.' : ''}
 
 NUMBER STYLE: "${statsStyle}"
-${statsStyle === 'minimal-numbers'  ? '- Just the number, very large (clamp(3rem,6vw,5rem)), weight 900, --primary color. No icons.' : ''}
-${statsStyle === 'icon-led'         ? '- 32×32 SVG icon above number, icon in --primary, opacity 0.8.' : ''}
-${statsStyle === 'gradient-text'    ? '- Number uses gradient text: background var(--gradient), -webkit-background-clip: text, color transparent.' : ''}
-${statsStyle === 'bordered-cells'   ? '- Each stat in a bordered card, border-radius var(--radius-lg), hover lift effect.' : ''}
+${statsStyle === 'minimal-numbers'  ? '- Just the number, very large (clamp(3rem,6vw,5rem)), weight 900, --primary or white. No icons.' : ''}
+${statsStyle === 'icon-led'         ? '- 32×32 SVG icon above number. Icon styled to match section bg. Each stat gets unique, meaningful icon.' : ''}
+${statsStyle === 'gradient-text'    ? '- Number: background var(--gradient), -webkit-background-clip: text, -webkit-text-fill-color: transparent.' : ''}
+${statsStyle === 'bordered-cells'   ? '- Each stat in bordered card (border: 1px solid var(--border), radius var(--radius-lg)), hover lift.' : ''}
 
-ANIMATION: useEffect + IntersectionObserver + requestAnimationFrame counter (0 → value, 1.5s ease-out). No libraries.
-SUFFIX: +/% in --accent, font-size 60% of number.
+ANIMATION: useEffect + IntersectionObserver + requestAnimationFrame counter (0 → value, 1.5s ease-out sqrt curve). No libraries.
+SUFFIX: +/% styled in var(--accent), font-size 60% of number size.
 
 Stats MUST be real, credible metrics for "${tokens.brandName}" (${tokens.siteType}) audience: "${tokens.targetAudience}".
-NOT generic "99.9% uptime" — use context-appropriate numbers (cases won, countries, years, clients, awards, etc).
+NOT generic "99.9% uptime" — use context-appropriate numbers (years of history, countries served, cases won, awards, clients, etc).
 
 REQUIRED IMPORTS:
 import { useEffect, useRef, useState } from 'react';
@@ -644,7 +786,7 @@ Return ONLY complete raw JSX file.`
 
 // ─── Step 3: Pages ────────────────────────────────────────────────────────────
 
-async function generatePages(tokens, layout, components, siteData, framework, ai, onLog = () => {}) {
+async function generatePages(tokens, creativeDirection, scenePlan, components, siteData, framework, ai, onLog = () => {}) {
   const isReact = framework === 'react';
   const ext     = isReact ? 'jsx' : 'ts';
   const pageDir = isReact ? 'src/pages' : 'src/app/pages';
@@ -654,7 +796,7 @@ async function generatePages(tokens, layout, components, siteData, framework, ai
     .filter(k => k.includes('/components/') && !k.endsWith('.css'))
     .map(k => k.split('/').pop().replace(/\.\w+$/, ''));
 
-  const tokenCtx = buildTokenContext(tokens, layout);
+  const tokenCtx = buildTokenContext(tokens, creativeDirection);
   const siteCtx  = buildSiteContext(siteData);
 
   // Single high-quality Home page — full token budget focused on one page
@@ -674,7 +816,7 @@ async function generatePages(tokens, layout, components, siteData, framework, ai
       .join('\n');
 
     const prompt = `Generate a COMPLETE, STUNNING, production-quality ${isReact ? 'React JSX' : 'Angular TS'} Home page for "${tokens.brandName}" (${tokens.siteType}).
-This is the ENTIRE website in one page — a rich, full-length landing page that showcases everything.
+This is the ENTIRE website in one page — a rich, full-length landing page that tells a complete story.
 
 ${tokenCtx}
 ${siteCtx}
@@ -682,19 +824,22 @@ ${siteCtx}
 AVAILABLE COMPONENTS (import ALL relevant ones from '../components/X'):
 ${compNames.join(', ')}
 
-MANDATORY PAGE STRUCTURE — include EVERY section in this exact order:
-${buildPageStructure(pageName, compNames, tokens, layout)}
+MANDATORY PAGE STRUCTURE — include EVERY section in this EXACT scene-driven order:
+${buildPageStructure(pageName, compNames, tokens, scenePlan)}
+
+PAGE NARRATIVE: ${scenePlan?.pageNarrative || 'A compelling journey from brand discovery to conversion'}
+TRANSITION STYLE: ${scenePlan?.transitionStyle || 'seamless gradient flow'} — implement section transitions accordingly
 
 DESIGN MISSION — this page must feel PREMIUM and UNIQUE:
-- Style archetype: ${tokens.styleArchetype || tokens.visualStyle || 'professional'} — let this drive every visual decision
-- Background rhythm: ${layout?.globalAnimations?.backgroundRhythm || 'alternate between var(--bg) and var(--bg-secondary)'}
-- Scroll animations: ${layout?.globalAnimations?.scrollTrigger || tokens.scrollAnimation || 'fade-up'} with ${layout?.globalAnimations?.stagger || '80ms'} stagger
-- Design notes: ${layout?.designNotes || 'Each section should feel visually distinct'}
+- Style archetype: ${tokens.styleArchetype || 'professional'} — let this drive every visual decision
+- Creative concept: ${creativeDirection.designConcept || 'A distinctive premium experience'}
+- Visual motif: ${creativeDirection.visualMotif || ''} — weave through connecting elements
+- Background rhythm alternates per scene — dark sections create drama, light breathe
+- Scroll animations: ${tokens.scrollAnimation || 'fade-up'} with 80ms stagger between elements
 - Tone of voice: ${tokens.toneOfVoice || 'professional'} — reflect this in any inline text/labels
-- Use large, bold typography for section headings to create visual hierarchy
 
 CRITICAL STYLING RULES:
-- Use <style>{\`...\`}</style> CSS tag with "home-" prefixed class names for ALL page-specific styles
+- Use <style>{\`...\`}</style> CSS tag with "home-" prefixed class names for page-specific styles
 - Import and USE the Layout component to wrap all content
 - Use CSS variables throughout: var(--primary), var(--accent), var(--bg), etc.
 
@@ -737,13 +882,28 @@ function buildPageComponents(pageName, available) {
   return all.slice(0, 3);
 }
 
-function buildPageStructure(pageName, available, tokens, layout = null) {
+function buildPageStructure(pageName, available, tokens, scenePlan = null) {
   const page = pageName.toLowerCase();
   const has = (c) => available.includes(c);
 
   if (page === 'home') {
-    // Use layout strategy section order if available
-    const sectionOrder = layout?.sectionOrder || ['Hero', 'Stats', 'Features', 'Testimonials', 'CTA'];
+    // Use scene plan order if available — this is the scene-driven assembly
+    const scenes = scenePlan?.scenes;
+    if (scenes?.length) {
+      const sceneDescriptions = scenes
+        .filter(scene => scene.componentType === 'Hero' || has(scene.componentType))
+        .map((scene, i) => {
+          const bg    = scene.background ? ` [bg: ${scene.background}]` : '';
+          const dens  = scene.density    ? ` [density: ${scene.density}]` : '';
+          const goal  = scene.goal       ? ` — ${scene.goal}` : '';
+          const twist = scene.twist      ? ` ✦ twist: "${scene.twist}"` : '';
+          return `${i + 1}. <${scene.componentType} />${goal}${bg}${dens}${twist}`;
+        });
+      return sceneDescriptions.join('\n');
+    }
+
+    // Fallback: default order
+    const sectionOrder = ['Hero', 'Stats', 'Features', 'Testimonials', 'CTA'];
     const sectionDescriptions = {
       Hero:         '<Hero /> — full viewport hero section',
       Stats:        '<Stats /> — impressive numbers row',
@@ -752,20 +912,10 @@ function buildPageStructure(pageName, available, tokens, layout = null) {
       Pricing:      '<Pricing /> — pricing cards',
       CTA:          '<CTA /> — conversion/call-to-action section',
     };
-    const sections = sectionOrder
+    return sectionOrder
       .filter(s => s === 'Hero' || has(s))
-      .map(s => sectionDescriptions[s] || `<${s} />`);
-
-    // Append layout notes per section if available
-    const layoutAnnotated = sections.map((desc, i) => {
-      const compName = sectionOrder.filter(s => s === 'Hero' || has(s))[i];
-      const sectionLayout = layout?.sections?.[compName];
-      if (sectionLayout?.layoutType) {
-        return `${desc} [layout: ${sectionLayout.layoutType}${sectionLayout.cardStyle ? `, cards: ${sectionLayout.cardStyle}` : ''}]`;
-      }
-      return desc;
-    });
-    return layoutAnnotated.map((s, i) => `${i + 1}. ${s}`).join('\n');
+      .map((s, i) => `${i + 1}. ${sectionDescriptions[s] || `<${s} />`}`)
+      .join('\n');
   }
   if (page === 'about') {
     return `1. Hero-style banner with "About ${tokens.brandName}" heading (page-specific section, NOT <Hero />)
@@ -1258,7 +1408,7 @@ async function withRetry(fn, ai, onLog, label = 'call', retries = 3) {
 
 // ─── Context helpers ──────────────────────────────────────────────────────────
 
-function buildTokenContext(tokens, layout = null) {
+function buildTokenContext(tokens, creativeDirection = null) {
   const angle = tokens.gradientAngle || '135deg';
   const grad = tokens.gradientStart && tokens.gradientEnd
     ? `linear-gradient(${angle}, ${tokens.gradientStart}, ${tokens.gradientEnd})`
@@ -1281,16 +1431,17 @@ function buildTokenContext(tokens, layout = null) {
     'gradient-saas':    'Vibrant mesh gradients, feature-rich layouts, conversion-optimized hierarchy. Bold gradient CTAs. Think Framer or Webflow.',
   }[archetype] || 'Clean, professional aesthetic with clear visual hierarchy.';
 
-  const layoutNotes = layout ? `\nLAYOUT STRATEGY:
-Section composition: ${(layout.sectionOrder || []).join(' → ')}
-Animations: ${layout.globalAnimations || 'fade-up'}
-Design notes: ${layout.designNotes || ''}` : '';
-
-  const cd = tokens.creativeDirection || {};
-  const creativeNotes = cd.designConcept ? `\nCREATIVE DIRECTION:
+  // Use the rich creativeDirection object if provided (from generateCreativeDirection step)
+  // Fall back to tokens.creativeDirection (seeded by analyzeAndTokenize)
+  const cd = creativeDirection || tokens.creativeDirection || {};
+  const creativeNotes = cd.designConcept ? `
+CREATIVE DIRECTION:
 Concept: ${cd.designConcept}
-Motif: ${cd.visualMotif || ''}
+Motif: ${cd.visualMotif || ''} | Tension: ${cd.designTension || ''}
 Energy: ${cd.layoutEnergy || 'balanced'} | Density: ${cd.density || 'balanced'}
+Color application: ${cd.colorApplication || ''}
+Typography: ${cd.typographyExpression || ''}
+Spacing: ${cd.spacingPhilosophy || ''}
 Avoid: ${(cd.doNotDo || []).join(' · ')}
 Must include: ${(cd.mustHaveMoments || []).join(' · ')}` : '';
 
@@ -1303,7 +1454,7 @@ CTA language: "${tokens.ctaLanguage || 'Get Started'}"
 STYLE ARCHETYPE: ${archetype}
 Design direction: ${archetypeGuide}
 Animation: ${mood} | Transition: ${speed} ${curve} | Scroll: ${tokens.scrollAnimation || 'fade-up'}
-Dark mode: ${tokens.darkMode || false}${layoutNotes}${creativeNotes}
+Dark mode: ${tokens.darkMode || false}${creativeNotes}
 
 COLORS:
 Primary: ${tokens.primaryColor} | Secondary: ${tokens.secondaryColor} | Accent: ${tokens.accentColor}
@@ -1652,6 +1803,113 @@ function sanitizeTokensCss(files) {
   css = css.replace(/(\s*)\}(\s*)$/, `${aliasBlock}\n}$2`);
 
   return { ...files, [key]: css };
+}
+
+// ─── Scene helpers ────────────────────────────────────────────────────────────
+
+/**
+ * Find the scene in the scene plan that corresponds to a given component type.
+ * Returns null if no scene found (component will fall back to defaults).
+ */
+function getSceneForComponent(componentType, scenePlan) {
+  if (!scenePlan?.scenes?.length) return null;
+  return scenePlan.scenes.find(s => s.componentType === componentType) || null;
+}
+
+/**
+ * Build a scene context block to inject into a component prompt.
+ * Gives each component its cinematic "scene brief" — goal, mood, twist.
+ */
+function buildSceneBlock(scene) {
+  if (!scene) return '';
+  return `
+🎬 YOUR SCENE:
+Goal: ${scene.goal}
+Layout: ${scene.layout}
+Visual hook: ${scene.visualHook}
+Density: ${scene.density} | Background: ${scene.background}
+Interaction: ${scene.interaction}
+Creative twist — IMPLEMENT THIS: "${scene.twist}"`;
+}
+
+// ─── Post-generation design validator ────────────────────────────────────────
+// Scores the generated output 0–10 and flags issues that suggest template-like
+// or broken output. Used to surface warnings in the progress log.
+
+function evaluateDesign(files, tokens, scenePlan) {
+  const issues = [];
+  let score = 10;
+
+  // Check 1: global.css must have substantial component CSS
+  const globalCss = files['src/styles/global.css'] || '';
+  if (globalCss.length < 800) {
+    issues.push('CSS appears minimal — styles may not have been extracted from components');
+    score -= 2;
+  }
+
+  // Check 2: All scene components should appear in Home page
+  const homeContent = Object.entries(files).find(([k]) => k.includes('Home'))?.[1] || '';
+  const sceneComponents = (scenePlan?.scenes || []).map(s => s.componentType);
+  const missingInHome = sceneComponents.filter(c => homeContent && !homeContent.includes(c));
+  if (missingInHome.length > 0) {
+    issues.push(`Home page missing scene components: ${missingInHome.join(', ')}`);
+    score -= missingInHome.length;
+  }
+
+  // Check 3: Hero component must exist and have real content
+  const heroContent = Object.entries(files).find(([k]) => k.includes('Hero.'))?.[1] || '';
+  if (heroContent.length < 400) {
+    issues.push('Hero component appears incomplete or was stubbed');
+    score -= 3;
+  }
+
+  // Check 4: No Lorem ipsum placeholder text
+  const allContent = Object.values(files).join(' ');
+  if (/lorem ipsum/i.test(allContent)) {
+    issues.push('Contains Lorem ipsum placeholder text — regenerate');
+    score -= 2;
+  }
+
+  // Check 5: Stub components detected (generation failures)
+  const stubCount = Object.values(files).filter(f =>
+    typeof f === 'string' && f.includes('failed to generate')
+  ).length;
+  if (stubCount > 0) {
+    issues.push(`${stubCount} component(s) failed to generate — showing stub placeholders`);
+    score -= stubCount * 2;
+  }
+
+  // Check 6: CSS variable invention — detect variables not in the standard set or aliases
+  const allowedVars = new Set([
+    'primary','secondary','accent','bg','bg-secondary','bg-alt','text','text-muted','muted',
+    'border','shadow','shadow-lg','shadow-xl','radius','radius-lg','radius-full','radius-pill',
+    'spacing','spacing-sm','spacing-lg','spacing-xl','gradient','gradient-accent','gradient-subtle',
+    'transition','transition-slow','font-heading','font-body','font-mono','font-base','container',
+    'primary-rgb','accent-rgb','bg-rgb','secondary-rgb','border-rgb',
+    // aliased set injected by sanitizeTokensCss
+    'spacing-unit','spacing-xs','spacing-2','spacing-3','spacing-4','spacing-md','spacing-xxl','spacing-xxxl',
+    'pill','pill-radius','transition-speed','transition-ease','font-size-base','letter-spacing-heading',
+    'line-height-body','card','card-bg','card-shadow','card-shadow-featured',
+    'ftr-bg','ftr-border','ftr-link-hover','ftr-radius','ftr-shadow','ftr-social-bg',
+    'ftr-text-light','ftr-text-muted','ftr-transition',
+  ]);
+  const usedVars = [...globalCss.matchAll(/var\(--([a-z][a-z0-9-]*)\)/g)].map(m => m[1]);
+  const unknownVars = [...new Set(usedVars.filter(v => !allowedVars.has(v)))];
+  if (unknownVars.length > 3) {
+    issues.push(`${unknownVars.length} potentially undefined CSS variables: ${unknownVars.slice(0, 5).join(', ')}…`);
+    score -= Math.min(2, Math.floor(unknownVars.length / 4));
+  }
+
+  return {
+    score:          Math.max(0, score),
+    issues,
+    unknownCssVars: unknownVars,
+    recommendation: score < 5
+      ? 'Output quality poor — consider regenerating with a stronger model'
+      : score < 7
+      ? 'Some issues found — review flagged components'
+      : 'Design quality acceptable',
+  };
 }
 
 module.exports = { generateRedesign };
