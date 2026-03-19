@@ -1,8 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useSearchParams, Link } from 'react-router-dom';
 import ProgressSteps from '../components/ProgressSteps';
-import FileTree from '../components/FileTree';
-import CodePreview from '../components/CodePreview';
 import TokenBadges from '../components/TokenBadges';
 import StackBlitzPreview from '../components/StackBlitzPreview';
 
@@ -15,11 +13,9 @@ export default function Result() {
 
   const [job, setJob]           = useState(null);
   const [logs, setLogs]         = useState([]);
-  const [selectedFile, setSelectedFile] = useState(null);
-  const [fileContent, setFileContent]   = useState('');
-  const [fileLoading, setFileLoading]   = useState(false);
   const [fileMap, setFileMap]   = useState(null);
-  const [view, setView]         = useState('code'); // 'code' | 'preview' | 'tokens' | 'logs'
+  const [view, setView]         = useState('preview'); // 'preview' | 'tokens' | 'logs'
+  const [panelOpen, setPanelOpen] = useState(true); // top info panel collapsed/expanded
 
   const logsEndRef = useRef(null);
   const sseRef     = useRef(null);
@@ -38,6 +34,7 @@ export default function Result() {
         // Auto-load files when job is done
         if (data.status === 'done' && !fileMap) {
           loadFiles();
+          setPanelOpen(false); // auto-collapse for max preview space
         }
       } catch (_) {}
     };
@@ -69,11 +66,6 @@ export default function Result() {
       const data = await res.json();
       if (data.files) {
         setFileMap(data.files);
-        // Auto-select a sensible default file
-        const priorities = ['src/App.jsx', 'src/App.tsx', 'src/pages/Home.jsx', 'src/pages/Home.tsx', 'package.json'];
-        const defaultFile = priorities.find(p => data.files[p]) || Object.keys(data.files)[0];
-        if (defaultFile) selectFile(defaultFile, data.files);
-        // Auto-switch to preview
         setView('preview');
       }
     } catch (_) {}
@@ -89,16 +81,6 @@ export default function Result() {
         body: JSON.stringify({ command }),
       });
     } catch (_) {}
-  }
-
-  function selectFile(path, map = fileMap) {
-    if (!map || !map[path]) return;
-    setSelectedFile(path);
-    setFileContent(map[path]);
-  }
-
-  function handleFileSelect(path) {
-    selectFile(path);
   }
 
   const isDone    = job?.status === 'done';
@@ -145,6 +127,24 @@ export default function Result() {
           )}
         </div>
 
+        {/* Collapse / expand top panel toggle */}
+        {isDone && job?.tokens && (
+          <button
+            onClick={() => setPanelOpen(o => !o)}
+            title={panelOpen ? 'Collapse info panel' : 'Expand info panel'}
+            style={s.collapseBtn}
+          >
+            <svg
+              width="13" height="13" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"
+              style={{ transform: panelOpen ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.22s ease' }}
+            >
+              <polyline points="18 15 12 9 6 15" />
+            </svg>
+            {panelOpen ? 'Collapse' : 'Design tokens'}
+          </button>
+        )}
+
         {isDone && (
           <a href={`/api/jobs/${jobId}/download`} style={s.downloadBtn}>
             <DownloadIcon />
@@ -153,55 +153,42 @@ export default function Result() {
         )}
       </header>
 
-      {/* ── Progress bar (running state) ── */}
-      {(isRunning || isError) && (
-        <div style={s.progressBanner}>
-          <ProgressSteps step={job?.step || 0} stepName={job?.stepName} status={job?.status} />
-        </div>
-      )}
-
-      {/* ── Token badges (done state) ── */}
-      {isDone && job?.tokens && (
-        <div style={s.tokenBanner}>
-          <div style={s.tokenInner}>
-            <span style={s.tokenTitle}>
-              <span style={s.greenDot} />
-              {job.projectName}
-            </span>
-            <TokenBadges tokens={job.tokens} />
+      {/* ── Collapsible top panel (progress during run / tokens when done) ── */}
+      <div style={{
+        overflow: 'hidden',
+        maxHeight: panelOpen ? '200px' : '0px',
+        transition: 'max-height 0.28s cubic-bezier(0.4,0,0.2,1)',
+        flexShrink: 0,
+      }}>
+        {/* Progress bar (running state) */}
+        {(isRunning || isError) && (
+          <div style={s.progressBanner}>
+            <ProgressSteps step={job?.step || 0} stepName={job?.stepName} status={job?.status} />
           </div>
-        </div>
-      )}
+        )}
+
+        {/* Token badges (done state) */}
+        {isDone && job?.tokens && (
+          <div style={s.tokenBanner}>
+            <div style={s.tokenInner}>
+              <span style={s.tokenTitle}>
+                <span style={s.greenDot} />
+                {job.projectName}
+              </span>
+              <TokenBadges tokens={job.tokens} />
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* ── IDE Layout ── */}
       <div style={s.ide}>
-        {/* Sidebar file tree */}
-        <aside style={s.sidebar}>
-          {fileMap ? (
-            <FileTree tree={job?.tree || buildClientTree(fileMap)} selected={selectedFile} onSelect={handleFileSelect} />
-          ) : (
-            <div style={s.sidebarPlaceholder}>
-              {isRunning ? (
-                <div style={s.waitMsg}>
-                  <span style={s.spinnerSm} />
-                  Generating files…
-                </div>
-              ) : isError ? (
-                <div style={{ padding: 20, color: 'var(--red)', fontSize: 12, fontFamily: 'var(--font-mono)' }}>
-                  {job?.error || 'An error occurred'}
-                </div>
-              ) : null}
-            </div>
-          )}
-        </aside>
-
-        {/* Main content */}
+        {/* Main content — full width, no sidebar */}
         <main style={s.mainArea}>
           {/* View switcher */}
           <div style={s.viewTabs}>
             {[
-              ['code',    'Code'],
-              ['preview', 'Preview', true],   // third arg = highlight when done
+              ['preview', 'Preview', true],
               ['logs',    'Logs'],
               ...(isDone ? [['tokens', 'Tokens']] : []),
             ].map(([v, label, highlight]) => (
@@ -224,63 +211,59 @@ export default function Result() {
             ))}
           </div>
 
-          {/* Preview view — StackBlitz WebContainer */}
-          {view === 'preview' && (
-            <div style={s.previewArea}>
+          {/* ── All panels stay mounted — toggled via display, never unmounted ── */}
+
+          {/* Preview — always mounted once fileMap is available so StackBlitz never reloads */}
+          <div style={{ ...s.previewArea, display: view === 'preview' ? 'flex' : 'none' }}>
+            {fileMap && (
               <StackBlitzPreview
                 files={fileMap}
                 projectName={job?.projectName}
                 tokens={job?.tokens}
               />
-            </div>
-          )}
-
-          {/* Code view */}
-          {view === 'code' && (
-            <div style={s.codeArea}>
-              <CodePreview
-                filePath={selectedFile}
-                content={fileContent}
-                loading={fileLoading}
-              />
-            </div>
-          )}
+            )}
+          </div>
 
           {/* Logs view */}
-          {view === 'logs' && (
-            <div style={s.logsArea}>
-              {logs.length === 0 ? (
-                <div style={s.logsEmpty}>
-                  {isRunning
-                    ? <><span style={s.spinnerSm} /> Waiting for logs…</>
-                    : 'No logs yet.'}
-                </div>
-              ) : (
-                <div style={s.logsList}>
-                  {logs.map((log, i) => (
-                    <div key={i} style={s.logLine}>
-                      <span style={s.logTime}>{new Date(log.time).toLocaleTimeString()}</span>
-                      <span style={{
-                        ...s.logMsg,
-                        color: log.message.startsWith('Error') ? 'var(--red)'
-                          : log.message.startsWith('🎉') ? 'var(--green)'
-                          : 'var(--text-2)',
-                      }}>
-                        {log.message}
-                      </span>
-                    </div>
-                  ))}
-                  <div ref={logsEndRef} />
-                </div>
-              )}
+          <div style={{ ...s.logsArea, display: view === 'logs' ? 'flex' : 'none' }}>
+            {logs.length === 0 ? (
+              <div style={s.logsEmpty}>
+                {isRunning
+                  ? <><span style={s.spinnerSm} /> Waiting for logs…</>
+                  : 'No logs yet.'}
+              </div>
+            ) : (
+              <div style={s.logsList}>
+                {logs.map((log, i) => (
+                  <div key={i} style={s.logLine}>
+                    <span style={s.logTime}>{new Date(log.time).toLocaleTimeString()}</span>
+                    <span style={{
+                      ...s.logMsg,
+                      color: log.message.startsWith('Error') ? 'var(--red)'
+                        : log.message.startsWith('🎉') ? 'var(--green)'
+                        : 'var(--text-2)',
+                    }}>
+                      {log.message}
+                    </span>
+                  </div>
+                ))}
+                <div ref={logsEndRef} />
+              </div>
+            )}
+          </div>
+
+          {/* Tokens view */}
+          {isDone && (
+            <div style={{ ...s.tokensArea, display: view === 'tokens' ? 'flex' : 'none' }}>
+              <TokensDetail tokens={job?.tokens} />
             </div>
           )}
 
-          {/* AI Edit input (only when done) */}
+          {/* AI Edit input — floats over preview, always visible when done */}
           {isDone && (
             <div style={s.editBar}>
               <div style={s.editIcon}>✨</div>
-              <input 
+              <input
                 style={s.editInput}
                 placeholder="Suggest an edit (e.g. 'Make the hero section dark', 'Add a price table')"
                 onKeyDown={(e) => {
@@ -290,7 +273,7 @@ export default function Result() {
                   }
                 }}
               />
-              <button 
+              <button
                 style={s.editBtn}
                 onClick={(e) => {
                   const input = e.currentTarget.previousSibling;
@@ -302,13 +285,6 @@ export default function Result() {
               >
                 Update
               </button>
-            </div>
-          )}
-
-          {/* Tokens view */}
-          {view === 'tokens' && isDone && (
-            <div style={s.tokensArea}>
-              <TokensDetail tokens={job?.tokens} />
             </div>
           )}
         </main>
@@ -428,6 +404,21 @@ const s = {
     padding: '2px 8px',
     fontFamily: 'var(--font-mono)',
   },
+  collapseBtn: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+    fontSize: 12,
+    color: 'var(--text-3)',
+    background: 'var(--bg-2)',
+    border: '1px solid var(--border)',
+    borderRadius: 6,
+    padding: '5px 10px',
+    fontFamily: 'var(--font-mono)',
+    cursor: 'pointer',
+    flexShrink: 0,
+    transition: 'color 0.15s, background 0.15s',
+  },
   downloadBtn: {
     display: 'flex',
     alignItems: 'center',
@@ -483,29 +474,6 @@ const s = {
     flex: 1,
     display: 'flex',
     overflow: 'hidden',
-  },
-  sidebar: {
-    width: 220,
-    flexShrink: 0,
-    borderRight: '1px solid var(--border)',
-    overflow: 'hidden',
-    display: 'flex',
-    flexDirection: 'column',
-  },
-  sidebarPlaceholder: {
-    flex: 1,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  waitMsg: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    gap: 10,
-    fontSize: 11,
-    color: 'var(--text-3)',
-    fontFamily: 'var(--font-mono)',
   },
   mainArea: {
     flex: 1,
@@ -567,7 +535,6 @@ const s = {
     padding: '1px 6px',
     color: 'var(--text-3)',
   },
-  codeArea: { flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' },
   previewArea: { flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' },
   logsArea: {
     flex: 1,
@@ -612,6 +579,7 @@ const s = {
   tokensArea: {
     flex: 1,
     overflow: 'hidden',
+    flexDirection: 'column',
     background: 'var(--bg)',
   },
   spinnerSm: {

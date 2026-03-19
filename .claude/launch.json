@@ -16,10 +16,10 @@
       "port": 3001
     },
     {
-      "name": "anand-anand",
-      "runtimeExecutable": "/usr/local/bin/node",
+      "name": "wordpress-com",
+      "runtimeExecutable": "/Users/shubh/.nvm/versions/node/v20.18.1/bin/node",
       "runtimeArgs": ["node_modules/vite/bin/vite.js", "--port", "5174"],
-      "cwd": "/tmp/anand-anand/anand-anand",
+      "cwd": "wordpress-com-preview",
       "port": 5174
     }
   ]

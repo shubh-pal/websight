@@ -1,0 +1,90 @@
+:root {
+  /* Brand colors */
+  --primary:      #3858E9;
+  --secondary:    #101517;
+  --accent:       #008A20;
+
+  /* Backgrounds */
+  --bg:           #FFFFFF;
+  --bg-secondary: #F6F7F7;
+  --bg-alt:       #F6F7F7;   /* alias used by some components */
+
+  /* Text */
+  --text:         #101517;
+  --text-muted:   #646970;
+  --muted:        #646970;   /* alias used by some components */
+
+  /* Borders */
+  --border:       #DCDCDE;
+
+  /* Typography */
+  --font-heading: 'Recoleta', sans-serif;
+  --font-body:    'Inter', sans-serif;
+  --font-mono:    'JetBrains Mono', monospace;
+  --font-base:    16px;
+
+  /* Shape */
+  --radius:       4px;
+  --radius-lg:    calc(4px * 2);
+  --radius-full:  9999px;
+  --radius-pill:  9999px;   /* alias used by some components */
+
+  /* Spacing */
+  --spacing:      1.5rem;
+  --spacing-sm:   calc(1.5rem / 2);
+  --spacing-lg:   calc(1.5rem * 2);
+  --spacing-xl:   calc(1.5rem * 4);
+
+  /* Shadows */
+  --shadow:       0 2px 16px rgba(0,0,0,0.08);
+  --shadow-lg:    0 8px 40px rgba(0,0,0,0.14);
+  --shadow-xl:    0 20px 60px rgba(0,0,0,0.18);
+
+  /* Layout */
+  --container:    1200px;
+
+  /* Transitions */
+  --transition:       0.2s ease;
+  --transition-slow:  0.4s ease;
+
+  /* Gradients */
+  --gradient:         linear-gradient(135deg, #3858E9, #1D35B4);
+  --gradient-accent:  linear-gradient(135deg, #3858E9, #008A20);
+  --gradient-subtle:  linear-gradient(135deg, #FFFFFF, #F6F7F7);
+
+  /* RGB values for rgba() usage — used by Header backdrop-filter, glow effects, etc. */
+  --primary-rgb:   56, 88, 233;
+  --accent-rgb:    0, 138, 32;
+  --bg-rgb:        255, 255, 255;
+  --secondary-rgb: 16, 21, 23;
+  --border-rgb:    220, 220, 222;
+/* ─── Auto-injected aliases for AI-invented variable names ─── */
+  --spacing-unit:          8px;
+  --spacing-xs:            0.5rem;
+  --spacing-2:             1rem;
+  --spacing-3:             1.5rem;
+  --spacing-4:             2rem;
+  --spacing-md:            1rem;
+  --spacing-xxl:           5rem;
+  --spacing-xxxl:          7rem;
+  --pill:                  9999px;
+  --pill-radius:           9999px;
+  --transition-speed:      0.2s;
+  --transition-ease:       cubic-bezier(0.4,0,0.2,1);
+  --font-size-base:        16px;
+  --letter-spacing-heading: -0.02em;
+  --line-height-body:      1.65;
+  --card:                  var(--bg-secondary);
+  --card-bg:               var(--bg-secondary);
+  --card-shadow:           var(--shadow);
+  --card-shadow-featured:  var(--shadow-lg);
+  --ftr-bg:                #0d0d0d;
+  --ftr-border:            rgba(255,255,255,0.1);
+  --ftr-link-hover:        #ffffff;
+  --ftr-radius:            var(--radius);
+  --ftr-shadow:            var(--shadow-lg);
+  --ftr-social-bg:         rgba(255,255,255,0.06);
+  --ftr-text-light:        rgba(255,255,255,0.9);
+  --ftr-text-muted:        rgba(255,255,255,0.5);
+  --ftr-transition:        var(--transition);
+}
