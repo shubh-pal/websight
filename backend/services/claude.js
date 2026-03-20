@@ -1,6 +1,8 @@
 const fs   = require('fs');
 const path = require('path');
 const { createAIClient } = require('./aiClient');
+const { getDesignSystem, buildDesignIntelligenceBlock } = require('./designIntelligence');
+const { fetchAllComponentReferences, buildReferenceBlock } = require('./componentFetcher');
 
 /**
  * Master pipeline: analyze → creativeDirection → scenePlan → components → pages → boilerplate
@@ -9,12 +11,25 @@ const { createAIClient } = require('./aiClient');
 async function generateRedesign(siteData, framework = 'react', onProgress = () => {}, model = 'claude-opus-4-5') {
   const ai = createAIClient(model);
 
+  // ── Design Intelligence: run before any AI call so every prompt benefits ──
+  onProgress(1, 'Loading design intelligence…');
+  const designSystem = getDesignSystem(siteData, siteData.siteType || 'other');
+  const diBlock      = buildDesignIntelligenceBlock(designSystem);
+  onProgress(1, `Design system matched → ${designSystem.category} · ${designSystem.fonts?.heading || 'auto font'}`);
+
+  // ── Fetch 21st.dev component references in parallel (non-blocking) ────────
+  const componentTypes = ['Hero', 'Features', 'Stats', 'Testimonials', 'CTA', 'Header', 'Footer'];
+  onProgress(1, 'Fetching production component references from 21st.dev…');
+  const componentRefs = await fetchAllComponentReferences(componentTypes);
+  const refCount = Object.keys(componentRefs).length;
+  onProgress(1, `✓ ${refCount}/${componentTypes.length} component references loaded`);
+
   onProgress(1, `Analyzing brand identity… [${model}]`);
-  const tokens = await analyzeAndTokenize(siteData, ai, (msg) => onProgress(1, msg));
+  const tokens = await analyzeAndTokenize(siteData, ai, (msg) => onProgress(1, msg), designSystem);
   onProgress(1, `Brand analyzed — ${tokens.brandName} · ${tokens.styleArchetype || tokens.siteType} · ${tokens.brandPersonality || ''}`);
 
   onProgress(2, 'Generating creative direction…');
-  const creativeDirection = await generateCreativeDirection(tokens, siteData, ai, (msg) => onProgress(2, msg));
+  const creativeDirection = await generateCreativeDirection(tokens, siteData, ai, (msg) => onProgress(2, msg), diBlock);
   onProgress(2, `Creative direction — ${(creativeDirection.designConcept || '').slice(0, 70)}…`);
 
   onProgress(3, 'Planning page scenes…');
@@ -22,7 +37,7 @@ async function generateRedesign(siteData, framework = 'react', onProgress = () =
   onProgress(3, `Scenes — ${(scenePlan.scenes || []).map(s => s.name).join(' → ')}`);
 
   onProgress(4, 'Generating shared components…');
-  const components = await generateComponents(tokens, creativeDirection, scenePlan, siteData, framework, ai, (msg) => onProgress(4, msg));
+  const components = await generateComponents(tokens, creativeDirection, scenePlan, siteData, framework, ai, (msg) => onProgress(4, msg), componentRefs, diBlock);
 
   onProgress(5, 'Generating pages…');
   const pages = await generatePages(tokens, creativeDirection, scenePlan, components, siteData, framework, ai, (msg) => onProgress(5, msg));
@@ -48,10 +63,17 @@ async function generateRedesign(siteData, framework = 'react', onProgress = () =
 
 // ─── Step 1: Design Tokens ────────────────────────────────────────────────────
 
-async function analyzeAndTokenize(siteData, ai, onLog = () => {}) {
+async function analyzeAndTokenize(siteData, ai, onLog = () => {}, designSystem = null) {
   const system = `You are a world-class brand strategist, product designer, and design system architect.
 You do NOT just extract styles — you interpret brand identity and elevate it to premium quality.
 Return ONLY valid JSON. No markdown. No explanation. Every field must be filled.`;
+
+  // Build design intelligence context for color/font grounding
+  const diColorHint = designSystem?.colors?.primary ? `
+${designSystem.isBrandOverride
+  ? `⚡ KNOWN BRAND — use these EXACT colors and fonts, do NOT invent alternatives:\n${designSystem.colorContext}\n${designSystem.fontContext}\nArchetype: ${designSystem.brandOverride?.archetype || 'minimal-swiss'}`
+  : `EXPERT COLOR GUIDANCE (use as strong starting point):\n${designSystem.colorContext}\n${designSystem.fontContext}`
+}` : '';
 
   const user = `Deeply analyze this website and generate a comprehensive brand system + creative direction.
 
@@ -65,6 +87,7 @@ Nav Links: ${JSON.stringify(siteData.navLinks || [])}
 Page Sections: ${JSON.stringify((siteData.sections || []).slice(0, 8))}
 Headings: ${JSON.stringify((siteData.headings || []).slice(0, 10))}
 HTML Excerpt: ${(siteData.bodyHTML || '').slice(0, 4000)}
+${diColorHint}
 
 YOUR TASKS:
 
@@ -222,7 +245,7 @@ Return ONLY this JSON (no markdown, no backticks, all fields filled):
 // Generates a rich, opinionated creative brief unique to this brand.
 // Expands on the basic creativeDirection seeded in analyzeAndTokenize.
 
-async function generateCreativeDirection(tokens, siteData, ai, onLog = () => {}) {
+async function generateCreativeDirection(tokens, siteData, ai, onLog = () => {}, diBlock = '') {
   const system = `You are an avant-garde creative director who designs websites that win awards and stop people mid-scroll.
 You REJECT safe, templated thinking. Every output must feel designed for THIS brand specifically.
 Return ONLY valid JSON. No markdown. No explanation.`;
@@ -255,6 +278,8 @@ Site content hints:
 Title: ${siteData.title}
 Description: ${(siteData.description || '').slice(0, 200)}
 Top headings: ${JSON.stringify((siteData.headings || []).slice(0, 5))}
+
+${diBlock ? `Industry design intelligence (apply these principles to your direction):\n${diBlock}` : ''}
 
 Return ONLY this JSON:
 {
@@ -390,7 +415,7 @@ Return ONLY this JSON:
 
 // ─── Step 2: Components ───────────────────────────────────────────────────────
 
-async function generateComponents(tokens, creativeDirection, scenePlan, siteData, framework, ai, onLog = () => {}) {
+async function generateComponents(tokens, creativeDirection, scenePlan, siteData, framework, ai, onLog = () => {}, componentRefs = {}, diBlock = '') {
   const isReact = framework === 'react';
   const ext     = isReact ? 'jsx' : 'ts';
   const compDir = isReact ? 'src/components' : 'src/app/components';
@@ -444,7 +469,8 @@ ${mustHave  ? `MUST INCLUDE: ${mustHave}` : ''}
 - Use layering: overlap elements, use z-index for depth, avoid flat same-plane layouts
 - Typography must vary dramatically in scale — giant headings next to fine print
 - At least ONE edge-to-edge full-bleed treatment in the section
-- This component must feel crafted by a human designer with a strong opinion — not generated by AI.`;
+- This component must feel crafted by a human designer with a strong opinion — not generated by AI.
+${diBlock ? `\n${diBlock}` : ''}`;
 
   // NOTE: tokens.css is NOT AI-generated — built deterministically in buildBoilerplate().
 
@@ -770,12 +796,33 @@ Return ONLY complete raw JSX file.`
     prompt: extraDefs[name].prompt(),
   }));
 
+  // Build shared CSS context block for Call 2 (CSS generation)
+  const cssCtx = `DESIGN TOKENS:
+Primary: ${tokens.primaryColor} | Accent: ${tokens.accentColor} | BG: ${tokens.bgColor}
+Font heading: ${tokens.fontHeading} | Font body: ${tokens.fontBody}
+Style archetype: ${archetype} | Animation mood: ${tokens.animationMood || 'subtle'}
+Border radius: ${tokens.borderRadius} | Transition: ${tokens.transitionSpeed} ${tokens.transitionCurve}
+Gradient: linear-gradient(${tokens.gradientAngle || '135deg'}, ${tokens.gradientStart || tokens.primaryColor}, ${tokens.gradientEnd || tokens.accentColor})
+
+CREATIVE DIRECTION:
+${designConcept}
+Visual motif: ${visualMotif}
+Layout energy: ${layoutEnergy} | Density: ${density}
+${doNotDo ? `AVOID: ${doNotDo}` : ''}
+${mustHave ? `MUST INCLUDE: ${mustHave}` : ''}
+${diBlock ? `\nINDUSTRY DESIGN RULES:\n${diBlock}` : ''}`;
+
   const files = {};
   for (const comp of [...coreComponents, ...extras]) {
-    const filePath = `${comp.dir}/${comp.name}`;
-    onLog(`Generating ${comp.name}…`);
+    const filePath   = `${comp.dir}/${comp.name}`;
+    const compType   = comp.name.replace(/\.\w+$/, ''); // e.g. "Hero"
+    const refCode    = componentRefs[compType] || null;
+    const refBlock   = refCode ? buildReferenceBlock(compType, refCode) : '';
+    const fullPrompt = refBlock ? `${comp.prompt}\n\n${refBlock}` : comp.prompt;
+
+    onLog(`Generating ${comp.name}${refCode ? ' + 21st.dev ref' : ''}…`);
     try {
-      files[filePath] = await generateSingleFile(comp.prompt, framework, ai, onLog);
+      files[filePath] = await generateSingleFile(fullPrompt, framework, ai, onLog, cssCtx);
     } catch (err) {
       console.error(`[pipeline] Failed ${filePath}:`, err.message);
       files[filePath] = buildStubComponent(comp.name.replace(/\.\w+$/, ''), err.message);
@@ -798,6 +845,28 @@ async function generatePages(tokens, creativeDirection, scenePlan, components, s
 
   const tokenCtx = buildTokenContext(tokens, creativeDirection);
   const siteCtx  = buildSiteContext(siteData);
+
+  // CSS context block — same as what generateComponents uses — for page-specific styles
+  const archetype   = tokens.styleArchetype || 'gradient-saas';
+  const designConcept = creativeDirection.designConcept || '';
+  const visualMotif   = creativeDirection.visualMotif   || '';
+  const layoutEnergy  = creativeDirection.layoutEnergy  || 'balanced';
+  const density       = creativeDirection.density       || 'balanced';
+  const doNotDo       = (creativeDirection.doNotDo      || []).join(' · ');
+  const mustHave      = (creativeDirection.mustHaveMoments || []).join(' · ');
+  const pageCssCtx = `DESIGN TOKENS:
+Primary: ${tokens.primaryColor} | Accent: ${tokens.accentColor} | BG: ${tokens.bgColor}
+Font heading: ${tokens.fontHeading} | Font body: ${tokens.fontBody}
+Style archetype: ${archetype} | Animation mood: ${tokens.animationMood || 'subtle'}
+Border radius: ${tokens.borderRadius} | Transition: ${tokens.transitionSpeed} ${tokens.transitionCurve}
+Gradient: linear-gradient(${tokens.gradientAngle || '135deg'}, ${tokens.gradientStart || tokens.primaryColor}, ${tokens.gradientEnd || tokens.accentColor})
+
+CREATIVE DIRECTION:
+${designConcept}
+Visual motif: ${visualMotif}
+Layout energy: ${layoutEnergy} | Density: ${density}
+${doNotDo  ? `AVOID: ${doNotDo}`  : ''}
+${mustHave ? `MUST INCLUDE: ${mustHave}` : ''}`;
 
   // Single high-quality Home page — full token budget focused on one page
   const pageNames = ['Home'];
@@ -859,7 +928,7 @@ Return ONLY the complete raw ${ext.toUpperCase()} file starting with import stat
 
     onLog(`Generating ${pageName} page…`);
     try {
-      files[filePath] = await generateSingleFile(prompt, framework, ai, onLog);
+      files[filePath] = await generateSingleFile(prompt, framework, ai, onLog, pageCssCtx);
     } catch (err) {
       console.error(`[pipeline] Failed ${filePath}:`, err.message);
       files[filePath] = buildStubComponent(pageName, err.message);
@@ -959,126 +1028,163 @@ export default function ${safeName}() {
 `;
 }
 
-// ─── Core generator: generate + detect truncation + continue if needed ────────
+// ─── Core generator: 2-call architecture (JSX structure → CSS) ───────────────
+// Call 1: JSX structure only — smaller, focused, zero truncation risk
+// Call 2: CSS with full knowledge of real class names from Call 1 output
 
-async function generateSingleFile(prompt, framework, ai, onLog = () => {}) {
+const JSX_SYSTEM = (isReact) => `You are a world-class ${isReact ? 'React/JSX' : 'Angular/TypeScript'} frontend engineer. Generate ONLY the component structure — NO CSS, NO <style> tags.
+
+═══ JSX-ONLY RULES ═══
+1. Use className attributes with component-prefix class names (e.g. "hero-section", "feat-card", "hdr-nav")
+2. ZERO inline style={{}} — no CSS whatsoever in this file
+3. ZERO <style> tags — CSS is generated separately
+4. Use semantic HTML5: <header>, <nav>, <main>, <section>, <footer>, <article>
+5. All interactions (useState, useEffect, IntersectionObserver, scroll) go here
+6. Icons: use simple inline SVG with viewBox="0 0 24 24", max 2-3 path elements — NO giant SVG data arrays
+7. Data arrays (features, stats, testimonials): keep to 3-4 items, strings only (no JSX in data)
+
+═══ CONTENT RULES ═══
+- NO Lorem ipsum — write real, specific content for this brand
+- NO placeholder text like "Feature title" or "Description here"
+- Text content belongs in JSX, not data arrays with JSX nodes
+
+═══ JSX VALIDITY (critical) ═══
+- Return ONLY raw file. No markdown fences. First char = first char of file.
+- COMPLETE file — no stubs, no TODOs
+- Every opened tag MUST be closed. Fragment wrapper <> </> when multiple root elements.
+- STRING LITERAL: use double quotes for strings with apostrophes: "Don't" not 'Don\\'t'
+- Export: export default ComponentName; (last line)`;
+
+const CSS_SYSTEM = `You are a world-class CSS designer creating premium, agency-quality component styles.
+
+═══ CSS RULES ═══
+1. Generate ONLY valid CSS — no JSX, no JavaScript, no markdown
+2. Use ONLY these CSS variables: var(--primary) var(--secondary) var(--accent) var(--bg) var(--bg-secondary) var(--text) var(--text-muted) var(--border) var(--shadow) var(--shadow-lg) var(--radius) var(--radius-lg) var(--radius-full) var(--gradient) var(--font-heading) var(--font-body) var(--transition) var(--container)
+3. EVERY class from the JSX MUST have styles — no unstyled classes
+4. Every interactive element: :hover + transition (150-200ms cubic-bezier(0.4,0,0.2,1))
+5. Every section: @media (max-width: 768px) + @media (max-width: 480px)
+6. Spacing: 8px grid — use 8, 16, 24, 32, 48, 64, 80, 96px directly
+
+═══ PREMIUM QUALITY ═══
+- Headings: letter-spacing: -0.02em to -0.04em, font-weight: 700-900
+- Responsive type: clamp(minRem, vw, maxRem) on all headings
+- Depth: multi-layer box-shadow on cards (0 1px 3px rgba(0,0,0,.06), 0 8px 32px rgba(0,0,0,.08))
+- Buttons: scale(1.02) on hover + box-shadow glow matching --primary color
+- Sections: vary backgrounds — never all white. Alternate: var(--bg), var(--bg-secondary), dark (#0d0d0d), gradient
+- Gradient text on hero headings: background: var(--gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent
+- Scroll animations: use @keyframes fadeUp { from { opacity:0; transform:translateY(24px) } to { opacity:1; transform:none } }
+- Decorative elements: ::before / ::after pseudo-elements for background accents, never extra DOM nodes
+
+═══ ANTI-PATTERNS ═══
+- No gray-on-gray (≥4.5:1 contrast always)
+- No @import statements (fonts loaded via global.css)
+- No flat same-color sections back to back
+
+Return ONLY raw CSS. First char = first char of CSS. No markdown fences.`;
+
+async function generateSingleFile(prompt, framework, ai, onLog = () => {}, cssContext = '') {
   const isReact = framework === 'react';
-  const system = `You are a world-class ${isReact ? 'React/JSX' : 'Angular/TypeScript'} frontend engineer and UI/UX designer. You build websites that look like they were designed by a top-tier agency — not generic templates.
+  const clean = (raw) => extractFirstCodeBlock(raw)
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
+    .replace(/<ctrl\d+>/g, '')
+    .trim();
 
-═══ STYLING RULES (non-negotiable) ═══
-1. ALL CSS goes in a <style>{\`...\`}</style> tag as the FIRST child inside return() — NEVER inline style={{}}
-2. Scoped class names with component prefix (e.g. "hero-", "hdr-", "feat-")
-3. Every interactive element needs :hover + transition. Every section needs @media (max-width: 768px) + @media (max-width: 480px)
-4. Use CSS variables everywhere: var(--primary), var(--accent), var(--bg), var(--text), var(--radius), var(--shadow), etc.
-5. Spacing follows 8px grid: 8, 16, 24, 32, 48, 64, 80, 96px
+  // ── Call 1: JSX structure only ────────────────────────────────────────────
+  let jsx = await withRetry(async () => {
+    const raw = (await ai.complete(JSX_SYSTEM(isReact), prompt, ai.modelMax)).trim();
+    return clean(raw);
+  }, ai, onLog, 'generate-jsx');
 
-═══ PREMIUM VISUAL QUALITY (apply these) ═══
-- Typography: headings use letter-spacing: -0.02em to -0.04em, font-weight: 700-900. Body line-height: 1.6-1.75.
-- Responsive type: use clamp() — e.g. font-size: clamp(2rem, 5vw, 4rem)
-- Depth: layer multiple box-shadows for realism. Cards: "0 1px 3px rgba(0,0,0,.06), 0 8px 32px rgba(0,0,0,.08)"
-- Micro-interactions: buttons scale on hover (transform: scale(1.02)), links get underline slide-in
-- Transitions: 150-200ms for hover, 250-300ms for layout changes — use "ease" or "cubic-bezier(0.4,0,0.2,1)"
-- Gradient text: use background-clip: text for hero headlines where appropriate
-- Subtle backgrounds: use radial-gradient or mesh patterns instead of flat solid colors
-- Icons: use Unicode symbols or inline SVG — NEVER emoji icons in production UI
-
-═══ CSS VARIABLE NAMES — use ONLY these exact names ═══
-var(--primary) var(--secondary) var(--accent) | var(--bg) var(--bg-secondary) var(--bg-alt) | var(--text) var(--text-muted) var(--muted) | var(--border) | var(--shadow) var(--shadow-lg) var(--shadow-xl) | var(--radius) var(--radius-lg) var(--radius-full) var(--radius-pill) | var(--spacing) var(--spacing-sm) var(--spacing-lg) var(--spacing-xl) | var(--gradient) var(--gradient-accent) var(--gradient-subtle) | var(--transition) var(--transition-slow) | var(--font-heading) var(--font-body) var(--container)
-For spacing values use: 8px, 16px, 24px, 32px, 48px, 64px, 80px, 96px directly — NEVER invent --spacing-unit, --spacing-2, --pill, --transition-ease or any other custom variable not in this list.
-
-═══ ANTI-PATTERNS (never do these) ═══
-- No gray-on-gray text (ensure ≥4.5:1 contrast on all text)
-- No color-only meaning (always pair color with text/icon/shape)
-- No placeholder/Lorem text — write real contextual content
-- No icon-only buttons without aria-label or visible text
-- No transitions faster than 100ms (feels broken) or slower than 400ms (feels sluggish)
-- No flat single-color section backgrounds that all look the same — vary bg: white, --bg-secondary, gradient, etc.
-- No perfectly centered text walls — use left-aligned body copy with max-width: 65ch
-
-═══ CODE QUALITY & JSX VALIDITY (critical — violations crash the app) ═══
-- Return ONLY raw file content. No markdown fences, no JSON, no explanation.
-- First character = first character of the file (e.g. 'i' for import).
-- COMPLETE file — no cut-offs, no TODO stubs, no placeholder functions.
-- Only import what you use. Correct relative paths ('../styles/tokens.css', '../components/Hero').
-
-JSX TAG RULES — follow exactly or the component will crash:
-1. Every HTML semantic element opened MUST be closed with its exact matching tag:
-   <footer> → </footer>  |  <header> → </header>  |  <nav> → </nav>
-   <section> → </section>  |  <main> → </main>  |  <form> → </form>
-   <ul>/<ol> → </ul>/</ol>  |  <table> → </table>
-2. Self-closing void elements MUST use />: <input />, <img />, <br />, <hr />
-3. FRAGMENT RULE — if return() contains a <style> block AND other JSX elements, ALL of them MUST be wrapped in a fragment:
-   WRONG:  return (\\n    <style>CSS</style>\\n    <section>...</section>\\n  );
-   CORRECT: return (\\n    <>\\n      <style>CSS</style>\\n      <section>...</section>\\n    </>\\n  );
-   This is the MOST COMMON crash cause. Every component with a <style> tag MUST use <> </> wrapper.
-4. DIV BALANCE CHECK — before finishing: count every opening <div and closing /div> — they MUST be equal. A single extra </div> before </footer> is the #1 crash cause.
-5. STRING LITERAL RULE — for ALL data arrays/objects (testimonials, stats, features, etc.): use double quotes for any string value that contains an apostrophe. NEVER use single quotes around text with contractions or possessives.
-   WRONG:  { quote: 'Austin's strategic counsel was invaluable.' }
-   CORRECT: { quote: "Austin's strategic counsel was invaluable." }
-   WRONG:  { text: 'Don't miss this opportunity.' }
-   CORRECT: { text: "Don't miss this opportunity." }
-6. CSS PROP RULE — when passing CSS variable values as JSX props, ALWAYS use string syntax. NEVER use curly braces around CSS functions — they are not valid JS expressions.
-   WRONG:  <Component color={var(--primary)} bg={rgba(0,0,0,0.5)} />
-   CORRECT: <Component color="var(--primary)" bg="rgba(0,0,0,0.5)" />
-5. Correct final structure of every component with a <style> tag:
-       </div>
-     </section>  {/* or </footer>, </header>, etc. */}
-   </>
-   );
-   }
-   export default ComponentName;`;
-
-  // Pass 1: generate at full token budget
-  let content = await withRetry(async () => {
-    const raw = (await ai.complete(system, prompt, ai.modelMax)).trim();
-    const code = extractFirstCodeBlock(raw).replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').replace(/<ctrl\d+>/g, '').trim();
-    // Return empty string here — withRetry will detect it and retry
-    return code;
-  }, ai, onLog, 'generate');
-
-  // Pass 2: continue ONLY if the output appears truncated
-  if (isTruncated(content)) {
-    onLog(`Output truncated — continuing…`);
-    const continuePrompt = `The following ${isReact ? 'React/JSX' : 'TypeScript'} code was cut off mid-way.
-Continue it from EXACTLY where it stopped. Output ONLY the remaining code — do NOT repeat what's already there.
-Do NOT add markdown fences. Start immediately with the next character after the cut.
-
---- CUT OFF CODE (last 1000 chars) ---
-${content.slice(-1000)}`;
-
-    const continuation = await withRetry(async () => {
-      const raw = (await ai.complete(system, continuePrompt, ai.modelMax)).trim();
-      return extractFirstCodeBlock(raw).replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').replace(/<ctrl\d+>/g, '').trim();
-    }, ai, onLog, 'continue').catch(() => '');
-
-    if (continuation) content = content + '\n' + continuation;
+  // Continuation only if clearly truncated (missing export default)
+  if (isTruncated(jsx) && !jsx.includes('export default')) {
+    onLog('JSX truncated — continuing…');
+    const cont = await withRetry(async () => {
+      const raw = (await ai.complete(JSX_SYSTEM(isReact),
+        `Continue this JSX from where it stopped. Output ONLY remaining code, no repeats.\n\n--- LAST 800 CHARS ---\n${jsx.slice(-800)}`,
+        ai.modelMax)).trim();
+      return clean(raw);
+    }, ai, onLog, 'continue-jsx').catch(() => '');
+    // Only accept continuation if it looks like JSX continuation (not a new component)
+    if (cont && !cont.match(/^import\s+React/m) && !cont.match(/^const \w+ = \(\)/m)) {
+      jsx = jsx + '\n' + cont;
+    }
   }
 
-  // Pass 3a: auto-fix CSS functions used as raw JSX prop values: ={var(--x)} → ="var(--x)"
-  content = fixCssVarProps(content);
+  // Apply mechanical JSX fixes
+  jsx = fixCssVarProps(jsx);
+  jsx = fixStringLiterals(jsx);
+  jsx = fixReturnFragment(jsx);
+  jsx = fixJsxTagBalance(jsx);
 
-  // Pass 3b: auto-fix unescaped apostrophes in single-quoted JS string literals
-  content = fixStringLiterals(content);
-
-  // Pass 3c: auto-fix adjacent JSX elements (missing <> fragment wrapper)
-  content = fixReturnFragment(content);
-
-  // Pass 3d: auto-fix div/semantic tag imbalance
-  content = fixJsxTagBalance(content);
-
-  // Pass 3e: structural integrity check + AI repair if issues remain
-  const structuralIssues = detectSyntaxIssues(content);
+  // Structural integrity check + AI repair if issues remain
+  const structuralIssues = detectSyntaxIssues(jsx);
   if (structuralIssues.length > 0) {
     onLog(`⚠ Structural issues detected — running repair pass (${structuralIssues.join(', ')})…`);
-    content = await repairWithAI(content, structuralIssues, framework, ai, onLog);
+    jsx = await repairWithAI(jsx, structuralIssues, framework, ai, onLog);
     // Re-apply mechanical fixes after AI repair
-    content = fixCssVarProps(content);
-    content = fixStringLiterals(content);
-    content = fixReturnFragment(content);
-    content = fixJsxTagBalance(content);
+    jsx = fixCssVarProps(jsx);
+    jsx = fixStringLiterals(jsx);
+    jsx = fixReturnFragment(jsx);
+    jsx = fixJsxTagBalance(jsx);
   }
 
-  return content;
+  // ── Call 2: CSS for this component ───────────────────────────────────────
+  // Extract every className from the JSX so the CSS call knows exactly what to style
+  const classNames = [...new Set(
+    [...jsx.matchAll(/className=["']([^"']+)["']/g)].map(m => m[1].split(/\s+/)).flat()
+  )].filter(Boolean);
+
+  if (classNames.length === 0) {
+    // No classNames — return JSX as-is (Layout wrapper, etc.)
+    return jsx;
+  }
+
+  const cssPrompt = `Generate complete, premium CSS for a ${isReact ? 'React' : 'Angular'} component.
+${cssContext}
+
+EXACT CLASS NAMES IN USE (style ALL of them — do not skip any):
+${classNames.map(c => `.${c}`).join('\n')}
+
+JSX STRUCTURE (for context — understand the layout, then style it beautifully):
+${jsx.slice(0, 3000)}
+
+Return ONLY raw CSS. Start with the first selector. No markdown fences.`;
+
+  let css = await withRetry(async () => {
+    const raw = (await ai.complete(CSS_SYSTEM, cssPrompt, Math.min(ai.modelMax, 8192))).trim();
+    return clean(raw);
+  }, ai, onLog, 'generate-css').catch(() => '');
+
+  // Return JSX with embedded style block so extractInlineCssToGlobal can hoist it
+  if (css && css.length > 50) {
+    // Inject CSS as <style> block as first child of return()
+    jsx = injectStyleBlock(jsx, css);
+  }
+
+  return jsx;
+}
+
+/** Injects a CSS string as <style>{`...`}</style> into the first return() of a JSX file */
+function injectStyleBlock(jsx, css) {
+  // Find the first return ( and inject <style> as first child
+  const returnMatch = jsx.match(/return\s*\(\s*\n?\s*(<>|<[A-Z][a-zA-Z]*|<[a-z][a-zA-Z]*)/);
+  if (!returnMatch) {
+    // Fallback: prepend style tag before the first JSX element after return
+    return jsx.replace(/(return\s*\([\s\n]*)(.*)/s, (_, pre, rest) =>
+      `${pre}<>\n      <style>{\`\n${css}\n      \`}</style>\n      ${rest.replace(/^\s*<>\s*/, '').replace(/\s*<\/>\s*$/, '')}\n    </>`
+    );
+  }
+  // Wrap in fragment with style first
+  return jsx.replace(/(return\s*\([\s\n]*)(<>|(?=<[a-zA-Z]))/s, (_, pre, open) => {
+    if (open === '<>') {
+      return `${pre}<>\n      <style>{\`\n${css}\n      \`}</style>\n      `;
+    }
+    return `${pre}<>\n      <style>{\`\n${css}\n      \`}</style>\n      ${open}`;
+  }).replace(/(\s*<\/>\s*\)\s*;?\s*}?\s*$)/s, (match) => {
+    // Ensure closing fragment exists
+    if (!match.includes('</>')) return `\n    </>\n  );\n}`;
+    return match;
+  });
 }
 
 // ─── JSX tag balance auto-fixer ──────────────────────────────────────────────
@@ -1736,10 +1842,30 @@ function extractInlineCssToGlobal(files) {
   }
 
   if (extractedCss.length > 0) {
+    const combined = extractedCss.join('\n\n');
+
+    // Hoist all @import lines to the very top (browsers require @import before all other rules)
+    const importLines   = [];
+    const nonImportCss  = combined.replace(/@import\s+url\([^)]+\)[^;]*;/g, (match) => {
+      if (!importLines.includes(match)) importLines.push(match);
+      return '';
+    });
+
     const block = '\n\n/* ─── Component styles (auto-extracted from JSX) ─── */\n'
-                + extractedCss.join('\n\n');
-    updatedFiles['src/styles/global.css'] = (updatedFiles['src/styles/global.css'] || '') + block;
-    console.log(`[extractInlineCssToGlobal] Appended CSS from ${extractedCss.length} component(s) to global.css`);
+                + nonImportCss.replace(/\n{3,}/g, '\n\n');
+
+    let globalCss = updatedFiles['src/styles/global.css'] || '';
+
+    // Also hoist any @import already in global.css
+    const existingImports = [];
+    globalCss = globalCss.replace(/@import\s+url\([^)]+\)[^;]*;/g, (match) => {
+      if (!existingImports.includes(match)) existingImports.push(match);
+      return '';
+    });
+
+    const allImports = [...new Set([...existingImports, ...importLines])];
+    updatedFiles['src/styles/global.css'] = (allImports.length ? allImports.join('\n') + '\n\n' : '') + globalCss + block;
+    console.log(`[extractInlineCssToGlobal] Appended CSS from ${extractedCss.length} component(s) to global.css (${allImports.length} @imports hoisted)`);
   }
 
   return updatedFiles;
