@@ -21,15 +21,15 @@ async function scrapeURL(url, onProgress = () => {}) {
   try {
     const browserData = await Promise.race([
       scrapeWithPuppeteer(url, onProgress),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('Browser timed out')), 8000))
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Browser timed out')), 25000))
     ]);
     
     if (data) {
       data.colors  = browserData.colors.length > 0 ? browserData.colors : data.colors;
       data.fonts   = browserData.fonts.length  > 0 ? browserData.fonts  : data.fonts;
       data.cssVars = browserData.cssVars;
-      // Prefer Puppeteer logo (fully-resolved absolute URL); fall back to cheerio result
       data.logoUrl = browserData.logoUrl || data.logoUrl || '';
+      data.originalScreenshot = browserData.originalScreenshot;
       data.source  = 'hybrid';
     } else {
       data = browserData;
@@ -58,13 +58,22 @@ async function scrapeWithPuppeteer(url, onProgress = () => {}) {
     await page.setExtraHTTPHeaders({ 'Accept-Language': 'en-US,en;q=0.9' });
 
     console.log(`[scraper] Navigating to ${url}...`);
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
+    await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
     
     onProgress('Extracting visual tokens…');
+    
+    // Scroll a bit to trigger lazy loads then back to top for banner
+    await page.evaluate(() => window.scrollBy(0, 500));
+    await new Promise(r => setTimeout(r, 800));
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await new Promise(r => setTimeout(r, 500));
+
+    // Capture screenshot of the original page (home banner)
+    const originalScreenshot = await page.screenshot({ encoding: 'base64', type: 'webp', quality: 65 });
 
     const data = await page.evaluate(() => {
       // --- Collect colors from computed styles (sampled) ---
-      const colorMap = new Map(); // color -> frequency
+      const colorMap = new Map();
       const fontSet = new Set();
       const elements = [...document.querySelectorAll('*')].slice(0, 400);
       elements.forEach(el => {
@@ -74,7 +83,6 @@ async function scrapeWithPuppeteer(url, onProgress = () => {}) {
             colorMap.set(c, (colorMap.get(c) || 0) + 1);
           }
         });
-        // Also grab background-image gradients
         if (s.backgroundImage && s.backgroundImage.includes('gradient')) {
           const matches = s.backgroundImage.match(/#[0-9a-fA-F]{3,8}/g) || [];
           matches.forEach(hex => colorMap.set(hex, (colorMap.get(hex) || 0) + 2));
@@ -82,13 +90,11 @@ async function scrapeWithPuppeteer(url, onProgress = () => {}) {
         const font = s.fontFamily?.split(',')[0].trim().replace(/['"]/g, '');
         if (font && font !== 'system-ui' && font !== 'inherit' && font !== '-apple-system') fontSet.add(font);
       });
-      // Sort by frequency, highest first
       const colors = [...colorMap.entries()]
         .sort((a, b) => b[1] - a[1])
         .map(([c]) => c)
         .slice(0, 30);
 
-      // --- Nav links ---
       const navLinks = [];
       document.querySelectorAll('nav a, header a, [role="navigation"] a').forEach(a => {
         const text = a.textContent.trim();
@@ -98,7 +104,6 @@ async function scrapeWithPuppeteer(url, onProgress = () => {}) {
         }
       });
 
-      // --- Page sections ---
       const sections = [];
       document.querySelectorAll('section, main > *, article, [class*="section"]').forEach((s, i) => {
         if (i >= 15) return;
@@ -111,7 +116,6 @@ async function scrapeWithPuppeteer(url, onProgress = () => {}) {
         });
       });
 
-      // --- CSS custom properties ---
       const cssVars = {};
       try {
         for (const sheet of document.styleSheets) {
@@ -125,29 +129,25 @@ async function scrapeWithPuppeteer(url, onProgress = () => {}) {
                 }
               }
             }
-          } catch (_) {} // cross-origin stylesheets
+          } catch (_) {}
         }
       } catch (_) {}
 
-      // --- All headings text ---
       const headings = [...document.querySelectorAll('h1,h2,h3,h4')].slice(0, 15).map(h => ({
         level: h.tagName,
-        text: h.textContent.trim().slice(0, 120),
+        text: h.textContent.trim().slice(0, 100),
       }));
 
-      // --- Key feature/benefit text (paragraphs under headings) ---
       const keyParagraphs = [...document.querySelectorAll('h2 + p, h3 + p, .hero p, [class*="hero"] p')]
         .slice(0, 6)
         .map(p => p.textContent.trim().slice(0, 200));
 
-      // --- Logo detection (priority-ordered) ---
       let logoUrl = '';
       const resolveUrl = (src) => {
         if (!src) return '';
         try { return new URL(src, window.location.href).href; } catch (_) { return src; }
       };
 
-      // P1: img inside header/nav with logo-hinting class or alt
       const logoSelectors = [
         'header img[class*="logo" i]', 'header img[alt*="logo" i]',
         'nav img[class*="logo" i]',    'nav img[alt*="logo" i]',
@@ -156,32 +156,7 @@ async function scrapeWithPuppeteer(url, onProgress = () => {}) {
       ];
       for (const sel of logoSelectors) {
         const el = document.querySelector(sel);
-        if (el?.src) { logoUrl = el.src; break; }
-      }
-      // P2: first img inside a nav/header anchor (common logo link pattern)
-      if (!logoUrl) {
-        const navImg = document.querySelector('header a img, nav a img');
-        if (navImg?.src && !navImg.src.endsWith('.svg') === false || navImg?.src) logoUrl = navImg?.src || '';
-      }
-      // P3: any img whose src contains "logo"
-      if (!logoUrl) {
-        const srcLogo = document.querySelector('img[src*="logo" i]');
-        if (srcLogo?.src) logoUrl = srcLogo.src;
-      }
-      // P4: apple-touch-icon (high-res, good quality)
-      if (!logoUrl) {
-        const touch = document.querySelector('link[rel="apple-touch-icon"]');
-        if (touch) logoUrl = resolveUrl(touch.getAttribute('href'));
-      }
-      // P5: SVG favicon
-      if (!logoUrl) {
-        const svgIcon = document.querySelector('link[rel="icon"][type="image/svg+xml"]');
-        if (svgIcon) logoUrl = resolveUrl(svgIcon.getAttribute('href'));
-      }
-      // P6: any favicon (last resort)
-      if (!logoUrl) {
-        const fav = document.querySelector('link[rel~="icon"]');
-        if (fav) logoUrl = resolveUrl(fav.getAttribute('href'));
+        if (el?.src) { logoUrl = resolveUrl(el.src); break; }
       }
 
       return {
@@ -200,7 +175,7 @@ async function scrapeWithPuppeteer(url, onProgress = () => {}) {
       };
     });
 
-    return { ...data, url, source: 'puppeteer' };
+    return { ...data, originalScreenshot, url, source: 'puppeteer' };
   } finally {
     if (browser) {
       browser.close().catch(() => {});
@@ -211,7 +186,6 @@ async function scrapeWithPuppeteer(url, onProgress = () => {}) {
 async function scrapeWithFetch(url) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 25000);
-  
   try {
     const res = await fetch(url, {
       signal: controller.signal,
@@ -236,8 +210,6 @@ function resolveLogoUrl(base, src) {
 
 function parseSiteData(url, html) {
   const $ = cheerio.load(html);
-
-  // --- Logo extraction ---
   let logoUrl = '';
   const logoAttrSelectors = [
     'header img[class*="logo" i]', 'header img[alt*="logo" i]',
@@ -249,27 +221,6 @@ function parseSiteData(url, html) {
     const src = $(sel).first().attr('src');
     if (src) { logoUrl = resolveLogoUrl(url, src); break; }
   }
-  // Fallback: first img inside a nav/header link
-  if (!logoUrl) {
-    const src = $('header a img, nav a img').first().attr('src');
-    if (src) logoUrl = resolveLogoUrl(url, src);
-  }
-  // Fallback: apple-touch-icon
-  if (!logoUrl) {
-    const href = $('link[rel="apple-touch-icon"]').attr('href');
-    if (href) logoUrl = resolveLogoUrl(url, href);
-  }
-  // Fallback: SVG favicon
-  if (!logoUrl) {
-    const href = $('link[rel="icon"][type="image/svg+xml"]').attr('href');
-    if (href) logoUrl = resolveLogoUrl(url, href);
-  }
-  // Fallback: any favicon
-  if (!logoUrl) {
-    const href = $('link[rel~="icon"]').first().attr('href');
-    if (href) logoUrl = resolveLogoUrl(url, href);
-  }
-
   const navLinks = [];
   $('nav a, header a').each((_, el) => {
     const text = $(el).text().trim();

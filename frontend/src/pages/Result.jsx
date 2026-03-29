@@ -3,6 +3,7 @@ import { useParams, useSearchParams, Link } from 'react-router-dom';
 import ProgressSteps from '../components/ProgressSteps';
 import TokenBadges from '../components/TokenBadges';
 import StackBlitzPreview from '../components/StackBlitzPreview';
+import CompareSlider from '../components/CompareSlider';
 
 export default function Result() {
   const { jobId } = useParams();
@@ -259,7 +260,7 @@ export default function Result() {
             {[
               ['preview', 'Preview', true],
               ['logs',    'Logs'],
-              ...(isDone ? [['tokens', 'Tokens']] : []),
+              ...(isDone ? [['tokens', 'Tokens'], ['compare', 'Compare']] : []),
             ].map(([v, label, highlight]) => (
               <button
                 key={v}
@@ -325,6 +326,18 @@ export default function Result() {
           {isDone && (
             <div style={{ ...s.tokensArea, display: view === 'tokens' ? 'flex' : 'none' }}>
               <TokensDetail tokens={job?.tokens} />
+            </div>
+          )}
+
+          {/* Compare view */}
+          {isDone && (
+            <div style={{ ...s.compareArea, display: view === 'compare' ? 'flex' : 'none' }}>
+              <div style={s.compareWrap}>
+                <CompareSlider 
+                  original={job?.originalScreenshot} 
+                  redesign={job?.redesignScreenshot} 
+                />
+              </div>
             </div>
           )}
 
@@ -439,6 +452,8 @@ const s = {
     background: 'var(--bg)',
     overflow: 'hidden',
   },
+  compareArea: { flex: 1, overflow: 'hidden', position: 'relative', display: 'flex', flexDirection: 'column' },
+  compareWrap: { flex: 1, padding: 30, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-1)' },
   topBar: {
     display: 'flex',
     alignItems: 'center',

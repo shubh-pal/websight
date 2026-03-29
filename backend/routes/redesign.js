@@ -75,6 +75,11 @@ async function runPipeline(jobId, url, snapshot, framework, model = 'gemini-2.5-
     const siteData = snapshot || await scrapeURL(url, (msg) => addLog(jobId, msg));
     addLog(jobId, `Scraped: "${siteData.title || 'untitled'}" via ${siteData.source}`);
 
+    // Store original screenshot
+    if (siteData.originalScreenshot) {
+      updateJob(jobId, { originalScreenshot: siteData.originalScreenshot });
+    }
+
     // ── 2-6 / 7  AI generation ────────────────────────────────────────────
     updateJob(jobId, { step: 2, stepName: 'AI design analysis' });
 

@@ -8,6 +8,7 @@
 const { exec } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const puppeteer = require('puppeteer');
 
 const PROJECTS_DIR = path.join(__dirname, '../../storage/projects');
 const APP_URL = process.env.APP_URL || 'localhost:3001';
@@ -79,4 +80,33 @@ function buildProject(jobId) {
   });
 }
 
-module.exports = { slugify, getPublishedUrl, buildProject, isBuilt, getDistDir, registerSubdomain, findJobIdBySubdomain };
+/**
+ * Take a screenshot of the published project for comparison.
+ */
+async function screenshotProject(subdomain) {
+  const url = getPublishedUrl(subdomain);
+  let browser;
+  try {
+    console.log(`[publish] Taking screenshot of: ${url}`);
+    browser = await puppeteer.launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
+    });
+    const page = await browser.newPage();
+    await page.setViewport({ width: 1440, height: 900 });
+    
+    // Wait for the local server/middleware to be ready for this subdomain
+    await page.goto(url, { waitUntil: 'networkidle0', timeout: 15000 });
+    
+    // Hide any overlays or dev tools if needed
+    const redesignScreenshot = await page.screenshot({ encoding: 'base64', type: 'webp', quality: 65 });
+    return redesignScreenshot;
+  } catch (err) {
+    console.warn(`[publish] Screenshot failed for ${url}:`, err.message);
+    return null;
+  } finally {
+    if (browser) await browser.close();
+  }
+}
+
+module.exports = { slugify, getPublishedUrl, buildProject, isBuilt, getDistDir, registerSubdomain, findJobIdBySubdomain, screenshotProject };

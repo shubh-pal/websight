@@ -24,7 +24,7 @@ const HOW_IT_WORKS = [
   { n: '01', title: 'Paste a URL', desc: 'Drop any website URL into the input — or use the Chrome extension to capture a tab including authenticated pages.' },
   { n: '02', title: 'AI Scrapes & Analyzes', desc: 'Puppeteer renders the full page. Claude reads everything: layout, palette, fonts, component structure, copy.' },
   { n: '03', title: 'Code is Generated', desc: 'A multi-step AI pipeline: design tokens first, then shared components, then full pages — all internally consistent.' },
-  { n: '04', title: 'Download & Run', desc: "Get a ZIP with a complete Vite or Angular project. One install command and you're live locally." },
+  { n: '04', title: 'Download & Run', desc: "Get a ZIP with a complete Vite (React) project. One install command and you're live locally." },
 ];
 
 export default function Home() {
@@ -156,7 +156,7 @@ export default function Home() {
           <div style={s.fwRow}>
             <span style={s.fwLabel}>Output framework</span>
             <div style={s.pills}>
-              {['react', 'angular'].map(fw => (
+              {['react'].map(fw => (
                 <button key={fw} type="button" onClick={() => setFramework(fw)}
                   style={{ ...s.pill, ...(framework === fw ? s.pillActive : {}) }}>
                   {fw === 'react' ? '⚛ React + Vite' : '🅰 Angular'}

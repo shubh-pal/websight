@@ -46,10 +46,17 @@ export function AuthProvider({ children }) {
       body: JSON.stringify({ email, password }),
       credentials: 'include',
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Login failed');
-    setUser(data);
-    return data;
+    
+    const contentType = res.headers.get('content-type');
+    if (contentType && contentType.includes('application/json')) {
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Login failed');
+      setUser(data);
+      return data;
+    } else {
+      const text = await res.text();
+      throw new Error(text.slice(0, 100) || 'Server returned an invalid response. Is the backend running?');
+    }
   }
 
   async function signup(email, password, name) {
@@ -59,9 +66,16 @@ export function AuthProvider({ children }) {
       body: JSON.stringify({ email, password, name }),
       credentials: 'include',
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Signup failed');
-    return data;
+    
+    const contentType = res.headers.get('content-type');
+    if (contentType && contentType.includes('application/json')) {
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Signup failed');
+      return data;
+    } else {
+      const text = await res.text();
+      throw new Error(text.slice(0, 100) || 'Server returned an invalid response. Is the backend running?');
+    }
   }
 
   const value = {

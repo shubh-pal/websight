@@ -1,4 +1,5 @@
-import { Routes, Route } from 'react-router-dom';
+import { useEffect } from 'react';
+import { Routes, Route, useLocation } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import Home from './pages/Home';
 import Result from './pages/Result';
@@ -9,6 +10,16 @@ import Settings from './pages/Settings';
 import ProtectedRoute from './components/ProtectedRoute';
 
 export default function App() {
+  const location = useLocation();
+
+  useEffect(() => {
+    if (window.gtag) {
+      window.gtag('config', 'G-XXXXXXXXXX', {
+        page_path: location.pathname + location.search,
+      });
+    }
+  }, [location]);
+
   return (
     <AuthProvider>
       <Routes>

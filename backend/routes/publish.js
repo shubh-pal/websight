@@ -1,6 +1,6 @@
 const express = require('express');
 const { getJob, getJobSync, updateJob } = require('../services/jobStore');
-const { slugify, getPublishedUrl, buildProject, isBuilt, registerSubdomain } = require('../services/publisher');
+const { slugify, getPublishedUrl, buildProject, isBuilt, registerSubdomain, screenshotProject } = require('../services/publisher');
 const requireAuth = require('../middleware/requireAuth');
 
 const router = express.Router();
@@ -31,8 +31,13 @@ router.post('/:id/publish', requireAuth, async (req, res) => {
   res.json({ subdomain, url: getPublishedUrl(subdomain), building: true });
 
   buildProject(req.params.id)
-    .then(() => {
-      updateJob(req.params.id, { publishStatus: 'live' });
+    .then(async () => {
+      // Capture screenshot of the new version
+      const redesignScreenshot = await screenshotProject(subdomain);
+      updateJob(req.params.id, { 
+        publishStatus: 'live',
+        redesignScreenshot: redesignScreenshot // Store base64 for now (simple)
+      });
       console.log(`[publish] ${subdomain} is live → ${getPublishedUrl(subdomain)}`);
     })
     .catch(err => {

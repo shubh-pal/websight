@@ -38,10 +38,9 @@ export default function Dashboard() {
   const mostUsedModel = Object.keys(modelCounts).reduce((a, b) =>
     modelCounts[a] > modelCounts[b] ? a : b, 'N/A');
 
-  const frameworkCounts = { react: 0, angular: 0 };
+  const frameworkCounts = { react: 0 };
   jobs.forEach(j => {
     if (j.framework === 'react') frameworkCounts.react++;
-    else if (j.framework === 'angular') frameworkCounts.angular++;
   });
 
   // Filter jobs
@@ -82,8 +81,8 @@ export default function Dashboard() {
             <div style={styles.statLabel}>Favorite Model</div>
           </div>
           <div style={styles.statBox}>
-            <div style={styles.statValue}>{frameworkCounts.react}R / {frameworkCounts.angular}A</div>
-            <div style={styles.statLabel}>Frameworks</div>
+            <div style={styles.statValue}>{frameworkCounts.react}</div>
+            <div style={styles.statLabel}>React Projects</div>
           </div>
         </div>
 
