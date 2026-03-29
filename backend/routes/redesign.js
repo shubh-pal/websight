@@ -5,22 +5,25 @@ const { generateRedesign } = require('../services/claude');
 const { buildProject } = require('../services/projectBuilder');
 const { createZip } = require('../services/zipper');
 const { createJob, updateJob, addLog, getJob, findCachedJob, registerUrlCache, loadFilesFromDisk } = require('../services/jobStore');
+const requireAuth = require('../middleware/requireAuth');
 
 const router = express.Router();
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 // POST /api/redesign  { url, framework, model, bypassCache }
-router.post('/', async (req, res) => {
-  const { url, framework = 'react', model = 'claude-opus-4-5', bypassCache = false } = req.body;
+router.post('/', requireAuth, async (req, res) => {
+  const { url, framework = 'react', model = 'gemini-2.5-pro', bypassCache = false } = req.body;
   if (!url) return res.status(400).json({ error: 'url is required' });
+
+  const userId = req.user?.id;
 
   // ── Cache hit check ────────────────────────────────────────────────────────
   if (!bypassCache) {
     const cachedJobId = findCachedJob(url);
     if (cachedJobId) {
       const jobId = uuidv4();
-      createJob(jobId);
+      createJob(jobId, { userId, url, framework, model });
       res.json({ jobId, fromCache: true });
       replayFromCache(jobId, cachedJobId, url, framework, model).catch(err => {
         console.error(`[job ${jobId}] cache replay error:`, err);
@@ -33,7 +36,7 @@ router.post('/', async (req, res) => {
 
   // ── Fresh generation ───────────────────────────────────────────────────────
   const jobId = uuidv4();
-  createJob(jobId);
+  createJob(jobId, { userId, url, framework, model });
   res.json({ jobId });
 
   runPipeline(jobId, url, null, framework, model).catch(err => {
@@ -41,7 +44,7 @@ router.post('/', async (req, res) => {
   });
 });
 
-async function runPipeline(jobId, url, snapshot, framework, model = 'claude-opus-4-5') {
+async function runPipeline(jobId, url, snapshot, framework, model = 'gemini-2.5-pro') {
   const targetUrl = url || snapshot?.url;
   try {
     // ── 1 / 5  Scrape ─────────────────────────────────────────────────────
@@ -51,40 +54,42 @@ async function runPipeline(jobId, url, snapshot, framework, model = 'claude-opus
     const siteData = snapshot || await scrapeURL(url, (msg) => addLog(jobId, msg));
     addLog(jobId, `Scraped: "${siteData.title || 'untitled'}" via ${siteData.source}`);
 
-    // ── 2-4 / 5  AI generation ────────────────────────────────────────────
+    // ── 2-6 / 7  AI generation ────────────────────────────────────────────
     updateJob(jobId, { step: 2, stepName: 'AI design analysis' });
 
     const { tokens, files } = await generateRedesign(
       siteData,
       framework,
       (step, msg) => {
-        // steps from claude.js are 1-based (1=tokens, 2=components, 3=pages, 4=boilerplate)
+        // steps from claude.js: 1=tokens, 2=creativeDir, 3=scenes, 4=components, 5=pages, 6=boilerplate
         updateJob(jobId, { step: step + 1, stepName: msg });
         addLog(jobId, msg);
       },
       model
     );
 
-    // ── 5 / 5  Build + ZIP ────────────────────────────────────────────────
-    updateJob(jobId, { step: 5, stepName: 'Building project & ZIP' });
+    // ── 7 / 7  Build + ZIP ────────────────────────────────────────────────
+    updateJob(jobId, { step: 7, stepName: 'Building project & ZIP' });
     addLog(jobId, 'Writing project files…');
 
     const projectName = (tokens.brandName || siteData.title || 'redesigned-site')
       .toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').slice(0, 40);
 
-    const { dir, tree, fileList } = await buildProject(jobId, files, projectName);
+    const { dir, tree, fileList, s3Prefix } = await buildProject(jobId, files, projectName);
 
     addLog(jobId, 'Creating ZIP archive…');
-    const zipPath = await createZip(dir, projectName);
+    const { zipPath, s3ZipKey } = await createZip(dir, projectName);
 
     updateJob(jobId, {
       status: 'done',
-      step: 5,
+      step: 7,
       stepName: 'Complete ✓',
       files,
       tree,
       fileList,
       zipPath,
+      s3ZipKey,
+      s3Prefix,
       projectName,
       tokens,
     });
@@ -176,8 +181,8 @@ async function replayFromCache(newJobId, cachedJobId, url, framework, model) {
   if (!cachedFiles) throw new Error('Cached project files not found on disk');
 
   const projectName = cached.projectName || brand.toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 40);
-  const { dir, tree, fileList } = await buildProject(newJobId, cachedFiles, projectName);
-  const zipPath = await createZip(dir, projectName);
+  const { dir, tree, fileList, s3Prefix } = await buildProject(newJobId, cachedFiles, projectName);
+  const { zipPath, s3ZipKey } = await createZip(dir, projectName);
 
   updateJob(newJobId, {
     status: 'done',
@@ -187,6 +192,8 @@ async function replayFromCache(newJobId, cachedJobId, url, framework, model) {
     tree,
     fileList,
     zipPath,
+    s3ZipKey,
+    s3Prefix,
     projectName,
     tokens: cached.tokens,
     fromCache: true,

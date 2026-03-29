@@ -1,16 +1,29 @@
 const express = require('express');
 const fs = require('fs');
-const { getJob, addSSEClient, removeSSEClient, listJobs, loadFilesFromDisk } = require('../services/jobStore');
+const { getJob, addSSEClient, removeSSEClient, listJobs, loadFilesFromDisk, getUserJobs } = require('../services/jobStore');
+const requireAuth = require('../middleware/requireAuth');
+const s3Storage = require('../services/s3Storage');
 
 const router = express.Router();
 
-// GET /api/jobs — list all past projects
-router.get('/', (req, res) => {
-  const allJobs = listJobs().map(j => {
-    const { files, logs, ...rest } = j;
-    return { ...rest, fileCount: files ? Object.keys(files).length : 0 };
-  });
-  res.json(allJobs);
+// GET /api/jobs — list only the current user's projects
+router.get('/', requireAuth, async (req, res) => {
+  const userId = req.user?.id;
+
+  // If DB is available, fetch from it (includes jobs from past sessions)
+  const dbJobs = await getUserJobs(userId);
+  if (dbJobs.length > 0) {
+    return res.json(dbJobs.map(j => ({ ...j, fileCount: 0 })));
+  }
+
+  // Fall back to in-memory jobs filtered by userId
+  const userJobs = listJobs()
+    .filter(j => j.userId === userId)
+    .map(j => {
+      const { files, logs, ...rest } = j;
+      return { ...rest, fileCount: files ? Object.keys(files).length : 0 };
+    });
+  res.json(userJobs);
 });
 
 // GET /api/jobs/:id — full job state (for initial load / polling fallback)
@@ -72,14 +85,27 @@ router.get('/:id/file', (req, res) => {
   res.json({ path: req.query.path, content });
 });
 
-// GET /api/jobs/:id/download — streams the ZIP file
-router.get('/:id/download', (req, res) => {
-  const job = getJob(req.params.id);
+// GET /api/jobs/:id/download — streams the ZIP file (prefers S3 signed URL)
+router.get('/:id/download', async (req, res) => {
+  const job = await getJob(req.params.id);
   if (!job) return res.status(404).json({ error: 'Job not found' });
-  if (!job.zipPath) return res.status(202).json({ message: 'ZIP not ready yet' });
-  if (!fs.existsSync(job.zipPath)) return res.status(410).json({ error: 'ZIP expired' });
 
   const filename = `${job.projectName || 'websight-project'}.zip`;
+
+  // Prefer S3: redirect to a short-lived signed URL
+  if (job.s3ZipKey && s3Storage.isEnabled) {
+    try {
+      const url = await s3Storage.getSignedDownloadUrl(job.s3ZipKey, 300); // 5-min URL
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      return res.redirect(302, url);
+    } catch (err) {
+      console.error('[download] S3 signed URL failed, falling back to local:', err.message);
+    }
+  }
+
+  // Fall back to local file
+  if (!job.zipPath) return res.status(202).json({ message: 'ZIP not ready yet' });
+  if (!fs.existsSync(job.zipPath)) return res.status(410).json({ error: 'ZIP file not found' });
   res.download(job.zipPath, filename);
 });
 

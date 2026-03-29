@@ -1,5 +1,7 @@
 const fs = require('fs');
 const path = require('path');
+const db = require('../db');
+const s3Storage = require('./s3Storage');
 
 const JOBS_FILE = path.join(__dirname, '../../storage/jobs.json');
 const jobs = new Map();
@@ -72,39 +74,53 @@ function saveJobsSync() {
 }
 
 /**
- * Lazy-load files from disk if they aren't in memory
+ * Lazy-load files from disk; falls back to S3 if not available locally.
+ * Returns files object or null. For S3 fallback, returns a Promise.
  */
 function loadFilesFromDisk(jobId) {
   const job = jobs.get(jobId);
-  if (!job || job.files) return job?.files;
+  if (job?.files) return job.files;
 
   const projectDir = path.join(__dirname, '../../storage/projects', jobId);
-  if (!fs.existsSync(projectDir)) return null;
 
-  const files = {};
-  const walk = (dir, base = '') => {
-    fs.readdirSync(dir).forEach(file => {
-      const fullPath = path.join(dir, file);
-      const relPath = path.join(base, file);
-      if (fs.statSync(fullPath).isDirectory()) {
-        if (file !== 'zips') walk(fullPath, relPath);
-      } else {
-        files[relPath] = fs.readFileSync(fullPath, 'utf8');
-      }
-    });
-  };
-
-  try {
-    walk(projectDir);
-    job.files = files;
-    return files;
-  } catch (err) {
-    console.error(`Failed to load files for job ${jobId}:`, err.message);
-    return null;
+  // Try local disk first
+  if (fs.existsSync(projectDir)) {
+    const files = {};
+    const walk = (dir, base = '') => {
+      fs.readdirSync(dir).forEach(file => {
+        const fullPath = path.join(dir, file);
+        const relPath = path.join(base, file);
+        if (fs.statSync(fullPath).isDirectory()) {
+          if (file !== 'zips') walk(fullPath, relPath);
+        } else {
+          files[relPath] = fs.readFileSync(fullPath, 'utf8');
+        }
+      });
+    };
+    try {
+      walk(projectDir);
+      if (job) job.files = files;
+      return files;
+    } catch (err) {
+      console.error(`Failed to load files for job ${jobId} from disk:`, err.message);
+    }
   }
+
+  // Fall back to S3
+  if (s3Storage.isEnabled) {
+    return s3Storage.downloadProjectFiles(jobId).then(files => {
+      if (files && job) job.files = files;
+      return files;
+    }).catch(err => {
+      console.error(`Failed to load files for job ${jobId} from S3:`, err.message);
+      return null;
+    });
+  }
+
+  return null;
 }
 
-function createJob(id) {
+function createJob(id, data = {}) {
   const job = {
     id,
     status: 'pending',
@@ -114,13 +130,28 @@ function createJob(id) {
     files: null,
     tree: null,
     zipPath: null,
-    projectName: null,
+    projectName: data.projectName || null,
     tokens: null,
     error: null,
     createdAt: Date.now(),
+    userId: data.userId || null,
+    url: data.url || null,
+    framework: data.framework || null,
+    model: data.model || null,
   };
   jobs.set(id, job);
   saveJobs();
+
+  // Save to database if available
+  if (db.pool && job.userId) {
+    db.query(
+      `INSERT INTO jobs (id, user_id, url, framework, model, status, project_name)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT (id) DO NOTHING`,
+      [job.id, job.userId, job.url, job.framework, job.model, job.status, job.projectName]
+    ).catch(err => console.error('[jobStore] Failed to insert job in DB:', err.message));
+  }
+
   return job;
 }
 
@@ -130,11 +161,63 @@ function updateJob(id, updates) {
   Object.assign(job, updates);
   saveJobs();
   broadcast(id, job);
+
+  // Update in database if available
+  if (db.pool) {
+    const dbUpdates = {};
+    if (updates.status !== undefined) dbUpdates.status = updates.status;
+    if (updates.projectName !== undefined) dbUpdates.project_name = updates.projectName;
+    if (updates.tokens !== undefined) dbUpdates.tokens = updates.tokens;
+    if (updates.error !== undefined) dbUpdates.error = updates.error;
+    if (updates.framework !== undefined) dbUpdates.framework = updates.framework;
+    if (updates.model !== undefined) dbUpdates.model = updates.model;
+
+    if (Object.keys(dbUpdates).length > 0) {
+      const setClauses = Object.keys(dbUpdates).map((key, i) => `${key} = $${i + 2}`).join(', ');
+      const values = [id, ...Object.values(dbUpdates)];
+      db.query(
+        `UPDATE jobs SET ${setClauses}, updated_at = NOW() WHERE id = $1`,
+        values
+      ).catch(err => console.error('[jobStore] Failed to update job in DB:', err.message));
+    }
+  }
+
   return job;
 }
 
-function getJob(id) {
-  return jobs.get(id) || null;
+async function getJob(id) {
+  // Try memory first
+  if (jobs.has(id)) {
+    return jobs.get(id);
+  }
+
+  // Try database if available
+  if (db.pool) {
+    try {
+      const result = await db.query('SELECT * FROM jobs WHERE id = $1', [id]);
+      if (result.rows.length > 0) {
+        const row = result.rows[0];
+        const job = {
+          id: row.id,
+          user_id: row.user_id,
+          status: row.status,
+          projectName: row.project_name,
+          tokens: row.tokens,
+          error: row.error,
+          url: row.url,
+          framework: row.framework,
+          model: row.model,
+          createdAt: new Date(row.created_at).getTime(),
+          updatedAt: new Date(row.updated_at).getTime(),
+        };
+        return job;
+      }
+    } catch (err) {
+      console.error('[jobStore] Failed to fetch job from DB:', err.message);
+    }
+  }
+
+  return null;
 }
 
 function addLog(id, message) {
@@ -194,9 +277,44 @@ function findCachedJob(url) {
   return jobId;
 }
 
+/**
+ * Get all jobs for a specific user from the database
+ */
+async function getUserJobs(userId) {
+  if (!db.pool) {
+    return [];
+  }
+
+  try {
+    const result = await db.query(
+      `SELECT id, user_id, status, project_name, url, framework, model, error, created_at, updated_at
+       FROM jobs
+       WHERE user_id = $1
+       ORDER BY created_at DESC`,
+      [userId]
+    );
+    return result.rows.map(row => ({
+      id: row.id,
+      userId: row.user_id,
+      status: row.status,
+      projectName: row.project_name,
+      url: row.url,
+      framework: row.framework,
+      model: row.model,
+      error: row.error,
+      createdAt: new Date(row.created_at).getTime(),
+      updatedAt: new Date(row.updated_at).getTime(),
+    }));
+  } catch (err) {
+    console.error('[jobStore] Failed to fetch user jobs from DB:', err.message);
+    return [];
+  }
+}
+
 module.exports = {
   createJob, updateJob, getJob, addLog,
   addSSEClient, removeSSEClient,
   listJobs, loadFilesFromDisk,
   findCachedJob, registerUrlCache,
+  getUserJobs,
 };

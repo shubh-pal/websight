@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import Navbar from '../components/Navbar';
+import { useAuth } from '../contexts/AuthContext';
 
 const EXAMPLES = [
   'https://stripe.com',
@@ -8,62 +10,44 @@ const EXAMPLES = [
   'https://notion.so',
 ];
 
-const MODEL_GROUPS = [
-  {
-    group: 'Google',
-    models: [
-      { id: 'gemini-2.5-flash-lite', label: 'Flash Lite',  badge: '⚡ Fast',    badgeColor: '#1ef5a0', desc: 'Fastest output' },
-      { id: 'gemini-2.5-flash',      label: 'Flash',       badge: '🚀 Smart',   badgeColor: '#00d4e8', desc: 'Best Gemini quality' },
-    ],
-  },
-  {
-    group: 'Anthropic',
-    models: [
-      { id: 'claude-sonnet-4-6', label: 'Sonnet', badge: '◈ Balanced', badgeColor: '#a897ff', desc: 'High quality + fast' },
-      { id: 'claude-opus-4-5',   label: 'Opus',   badge: '✦ Best',     badgeColor: '#f5a623', desc: 'Max quality' },
-    ],
-  },
-  {
-    group: 'OpenAI',
-    models: [
-      { id: 'gpt-4o-mini', label: 'GPT-4o mini', badge: '💚 Cheap',  badgeColor: '#74c991', desc: 'Fast & affordable' },
-      { id: 'gpt-4o',      label: 'GPT-4o',      badge: '🔥 Strong', badgeColor: '#10a37f', desc: 'GPT flagship model' },
-    ],
-  },
-  {
-    group: 'Groq',
-    models: [
-      { id: 'llama-3.1-8b-instant',    label: 'Llama 3.1 8B',  badge: '⚡ Instant', badgeColor: '#f97316', desc: 'Ultra-fast inference' },
-      { id: 'llama-3.3-70b-versatile', label: 'Llama 3.3 70B', badge: '🦙 Power',   badgeColor: '#fb923c', desc: 'Best open-source' },
-    ],
-  },
-  {
-    group: 'DeepSeek',
-    models: [
-      { id: 'deepseek-chat', label: 'DeepSeek V3', badge: '🐋 Value', badgeColor: '#60a5fa', desc: 'GPT-4 quality, low cost' },
-    ],
-  },
+const WEB_MODELS = [
+  { id: 'gemini-2.5-pro',           label: 'Gemini 2.5 Pro',   badge: '⭐ Best',     badgeColor: '#00d4e8', desc: 'Highest quality · Google' },
+  { id: 'gemini-2.5-flash',         label: 'Gemini 2.5 Flash', badge: '⚡ Fast',     badgeColor: '#1ef5a0', desc: 'Fast & capable · Google' },
+  { id: 'gemini-2.5-flash-lite',    label: 'Gemini Flash Lite', badge: '🚀 Fastest', badgeColor: '#a8f5d0', desc: 'Fastest output · Google' },
+  { id: 'claude-sonnet-4-6',        label: 'Claude Sonnet 4',  badge: '◈ Balanced', badgeColor: '#a897ff', desc: 'High quality · Anthropic' },
+  { id: 'claude-opus-4-5',          label: 'Claude Opus',      badge: '✦ Premium',  badgeColor: '#f5a623', desc: 'Best Claude · Anthropic' },
+  { id: 'gpt-4o',                   label: 'GPT-4o',           badge: '🔥 Strong',  badgeColor: '#10a37f', desc: 'Flagship · OpenAI' },
+  { id: 'gpt-4o-mini',              label: 'GPT-4o Mini',      badge: '💚 Cheap',   badgeColor: '#74c991', desc: 'Fast & cheap · OpenAI' },
+  { id: 'llama-3.3-70b-versatile',  label: 'Llama 3.3 70B',   badge: '🦙 Free',    badgeColor: '#fb923c', desc: 'Best open-source · Groq' },
+  { id: 'deepseek-chat',            label: 'DeepSeek V3',      badge: '🐋 Value',   badgeColor: '#60a5fa', desc: 'GPT-4 quality, low cost' },
 ];
 
-// Flat list for backwards compat
-const MODELS = MODEL_GROUPS.flatMap(g => g.models);
+
 
 export default function Home() {
   const [url, setUrl]               = useState('');
-  const [framework, setFramework]   = useState('react');
-  const [model, setModel]           = useState('gemini-2.5-flash');
+  const [framework, setFramework]     = useState('react');
+  const [model, setModel]             = useState('gemini-2.5-pro');
+
+  const [showModelPicker, setShowModelPicker] = useState(false);
   const [loading, setLoading]       = useState(false);
   const [error, setError]           = useState('');
   const [bypassCache, setBypassCache] = useState(false);
   const [recentProjects, setRecentProjects] = useState([]);
   const navigate = useNavigate();
+  const { user } = useAuth();
 
   useEffect(() => {
+    if (!user) {
+      // User just logged out (or is not logged in) — clear projects immediately
+      setRecentProjects([]);
+      return;
+    }
     fetch('/api/jobs')
       .then(r => r.json())
       .then(data => setRecentProjects(data))
       .catch(() => {});
-  }, []);
+  }, [user]);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -91,20 +75,7 @@ export default function Home() {
       <div style={styles.grid} aria-hidden />
 
       {/* Top bar */}
-      <header style={styles.header}>
-        <div style={styles.logo}>
-          <LogoMark />
-          <span style={styles.logoText}>WebSight</span>
-        </div>
-        <a
-          href="https://github.com"
-          style={styles.ghLink}
-          target="_blank"
-          rel="noreferrer"
-        >
-          <GithubIcon /> GitHub
-        </a>
-      </header>
+      <Navbar />
 
       {/* Hero */}
       <main style={styles.main}>
@@ -159,40 +130,6 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Model selector */}
-          <div style={styles.modelRow}>
-            <span style={styles.fwLabel}>AI model</span>
-            <div style={styles.modelGroups}>
-              {MODEL_GROUPS.map(g => (
-                <div key={g.group} style={styles.modelGroup}>
-                  <span style={styles.modelGroupLabel}>{g.group}</span>
-                  <div style={styles.modelGroupRow}>
-                    {g.models.map(m => {
-                      const active = model === m.id;
-                      return (
-                        <button
-                          key={m.id}
-                          type="button"
-                          onClick={() => setModel(m.id)}
-                          style={{ ...styles.modelCard, ...(active ? styles.modelCardActive : {}) }}
-                        >
-                          <div style={styles.modelTop}>
-                            <span style={styles.modelName}>{m.label}</span>
-                            <span style={{ ...styles.modelBadge, color: m.badgeColor, borderColor: m.badgeColor + '44', background: m.badgeColor + '12' }}>
-                              {m.badge}
-                            </span>
-                          </div>
-                          <span style={styles.modelDesc}>{m.desc}</span>
-                          {active && <span style={styles.modelCheck}>✓</span>}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
           {error && <p style={styles.error}>{error}</p>}
 
           <button type="submit" style={styles.btn} disabled={loading}>
@@ -207,6 +144,18 @@ export default function Home() {
               </>
             )}
           </button>
+
+          {/* Model summary bar */}
+          <div style={styles.modelBar}>
+            <div style={styles.modelBarInfo}>
+              <span style={styles.modelBarLabel}>Web</span>
+              <span style={styles.modelBarValue}>{WEB_MODELS.find(m => m.id === model)?.label || model}</span>
+
+            </div>
+            <button type="button" style={styles.modelBarBtn} onClick={() => setShowModelPicker(true)}>
+              ⚙ Update Models
+            </button>
+          </div>
 
           {/* Bypass cache toggle */}
           <label style={styles.cacheRow}>
@@ -229,6 +178,7 @@ export default function Home() {
               <span style={styles.cacheHint}> — force a fresh generation</span>
             </span>
           </label>
+
         </form>
 
         {/* Recent projects */}
@@ -289,6 +239,46 @@ export default function Home() {
           ))}
         </div>
       </main>
+
+      {/* ── Model Picker Modal ── */}
+      {showModelPicker && (
+        <div style={styles.modalOverlay} onClick={() => setShowModelPicker(false)}>
+          <div style={styles.modal} onClick={e => e.stopPropagation()}>
+            <div style={styles.modalHeader}>
+              <span style={styles.modalTitle}>⚙ Model Settings</span>
+              <button style={styles.modalClose} onClick={() => setShowModelPicker(false)}>✕</button>
+            </div>
+
+            {/* Web Generation Model */}
+            <div style={styles.modalSection}>
+              <label style={styles.modalLabel}>Web Generation Model</label>
+              <p style={styles.modalHint}>The AI model used to generate your website code</p>
+              <select
+                value={model}
+                onChange={e => setModel(e.target.value)}
+                style={styles.modalSelect}
+              >
+                {WEB_MODELS.map(m => (
+                  <option key={m.id} value={m.id}>{m.label} — {m.desc}</option>
+                ))}
+              </select>
+              {WEB_MODELS.find(m => m.id === model) && (
+                <div style={styles.modelPreview}>
+                  <span style={{ ...styles.modelPreviewBadge, color: WEB_MODELS.find(m => m.id === model).badgeColor, borderColor: WEB_MODELS.find(m => m.id === model).badgeColor + '44', background: WEB_MODELS.find(m => m.id === model).badgeColor + '15' }}>
+                    {WEB_MODELS.find(m => m.id === model).badge}
+                  </span>
+                  <span style={styles.modelPreviewDesc}>{WEB_MODELS.find(m => m.id === model).desc}</span>
+                </div>
+              )}
+            </div>
+
+
+            <button style={styles.modalSave} onClick={() => setShowModelPicker(false)}>
+              Save & Close
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -453,94 +443,153 @@ const styles = {
     padding: '6px 12px',
     marginBottom: 6,
   },
-  modelRow: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 8,
-    padding: '6px 12px',
-    marginBottom: 6,
-  },
-  modelGroups: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 8,
-  },
-  modelGroup: {
-    display: 'flex',
-    alignItems: 'flex-start',
-    gap: 8,
-  },
-  modelGroupLabel: {
-    fontSize: 10,
-    color: 'var(--text-3)',
-    fontFamily: 'var(--font-mono)',
-    minWidth: 60,
-    paddingTop: 10,
-    textAlign: 'right',
-    flexShrink: 0,
-    letterSpacing: '0.04em',
-  },
-  modelGroupRow: {
-    display: 'flex',
-    gap: 5,
-    flex: 1,
-    flexWrap: 'wrap',
-  },
-  modelCard: {
-    position: 'relative',
-    background: 'var(--bg-3)',
-    border: '1px solid var(--border)',
-    borderRadius: 8,
-    padding: '9px 10px',
-    cursor: 'pointer',
-    textAlign: 'left',
-    transition: 'all 0.15s',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 4,
-    minWidth: 110,
-    flex: '1 1 110px',
-  },
-  modelCardActive: {
-    background: 'rgba(124,106,247,0.1)',
-    borderColor: 'rgba(124,106,247,0.45)',
-  },
-  modelTop: {
+  modelBar: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 4,
+    padding: '8px 14px',
+    background: 'var(--bg-2)',
+    border: '1px solid var(--border)',
+    borderRadius: 8,
+    marginTop: 2,
   },
-  modelName: {
-    fontSize: 11,
-    fontWeight: 600,
-    color: 'var(--text)',
-    fontFamily: 'var(--font-mono)',
-    whiteSpace: 'nowrap',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
+  modelBarInfo: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+    flexWrap: 'wrap',
   },
-  modelBadge: {
-    fontSize: 9,
-    borderRadius: 4,
-    padding: '1px 5px',
-    border: '1px solid',
-    whiteSpace: 'nowrap',
-    flexShrink: 0,
-    fontFamily: 'var(--font-mono)',
-  },
-  modelDesc: {
+  modelBarLabel: {
     fontSize: 10,
     color: 'var(--text-3)',
+    fontFamily: 'var(--font-mono)',
+    letterSpacing: '0.05em',
+    textTransform: 'uppercase',
+  },
+  modelBarValue: {
+    fontSize: 12,
+    color: 'var(--text)',
+    fontWeight: 600,
+    fontFamily: 'var(--font-mono)',
+  },
+
+  modelBarBtn: {
+    fontSize: 12,
+    color: 'var(--text-2)',
+    background: 'var(--bg-3)',
+    border: '1px solid var(--border)',
+    padding: '5px 12px',
+    borderRadius: 6,
+    cursor: 'pointer',
+    fontWeight: 500,
+    transition: 'all 0.15s',
+    flexShrink: 0,
+  },
+  // ── Modal ──
+  modalOverlay: {
+    position: 'fixed',
+    inset: 0,
+    background: 'rgba(0,0,0,0.65)',
+    backdropFilter: 'blur(4px)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 1000,
+  },
+  modal: {
+    background: 'var(--bg-2)',
+    border: '1px solid var(--border)',
+    borderRadius: 16,
+    padding: '28px 32px',
+    width: 480,
+    maxWidth: '94vw',
+    boxShadow: '0 32px 80px rgba(0,0,0,0.6)',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 20,
+  },
+  modalHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  modalTitle: {
+    fontSize: 16,
+    fontWeight: 700,
+    color: 'var(--text)',
+    letterSpacing: '-0.01em',
+  },
+  modalClose: {
+    background: 'none',
+    border: 'none',
+    color: 'var(--text-3)',
+    fontSize: 16,
+    cursor: 'pointer',
+    padding: '2px 6px',
+    borderRadius: 4,
+  },
+  modalSection: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 8,
+  },
+  modalLabel: {
+    fontSize: 13,
+    fontWeight: 600,
+    color: 'var(--text)',
+  },
+  modalHint: {
+    fontSize: 11,
+    color: 'var(--text-3)',
+    margin: 0,
     lineHeight: 1.4,
   },
-  modelCheck: {
-    position: 'absolute',
-    top: 6,
-    right: 7,
+  modalSelect: {
+    width: '100%',
+    padding: '10px 12px',
+    background: 'var(--bg-3)',
+    border: '1px solid var(--border)',
+    borderRadius: 8,
+    color: 'var(--text)',
+    fontSize: 13,
+    cursor: 'pointer',
+    outline: 'none',
+    fontFamily: 'var(--font-body)',
+  },
+  modelPreview: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    padding: '6px 10px',
+    background: 'var(--bg)',
+    borderRadius: 6,
+    border: '1px solid var(--border)',
+  },
+  modelPreviewBadge: {
     fontSize: 10,
-    color: 'var(--violet-bright)',
-    fontWeight: 700,
+    fontFamily: 'var(--font-mono)',
+    fontWeight: 600,
+    padding: '2px 7px',
+    borderRadius: 4,
+    border: '1px solid',
+    whiteSpace: 'nowrap',
+  },
+  modelPreviewDesc: {
+    fontSize: 11,
+    color: 'var(--text-2)',
+    lineHeight: 1.4,
+  },
+  modalSave: {
+    width: '100%',
+    padding: '12px',
+    background: 'var(--violet)',
+    border: 'none',
+    borderRadius: 8,
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: 600,
+    cursor: 'pointer',
+    transition: 'opacity 0.15s',
   },
   fwLabel: { fontSize: 12, color: 'var(--text-3)', fontFamily: 'var(--font-mono)' },
   pills: { display: 'flex', gap: 6 },

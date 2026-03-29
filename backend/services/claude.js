@@ -8,7 +8,7 @@ const { fetchAllComponentReferences, buildReferenceBlock } = require('./componen
  * Master pipeline: analyze → creativeDirection → scenePlan → components → pages → boilerplate
  * model: 'gemini-2.5-flash' | 'claude-opus-4-5' | etc.
  */
-async function generateRedesign(siteData, framework = 'react', onProgress = () => {}, model = 'claude-opus-4-5') {
+async function generateRedesign(siteData, framework = 'react', onProgress = () => {}, model = 'gemini-2.5-pro') {
   const ai = createAIClient(model);
 
   // ── Design Intelligence: run before any AI call so every prompt benefits ──
@@ -51,6 +51,78 @@ async function generateRedesign(siteData, framework = 'react', onProgress = () =
   let files = { ...boilerplate, ...components, ...pages };
   files = extractInlineCssToGlobal(files);
   files = sanitizeTokensCss(files);
+
+  // Final pass: fix any unclosed JSX fragments that survived CSS injection / post-processing
+  // Also fix wrong tokens.css import paths (components use ../styles/tokens.css, not ./tokens.css)
+  for (const [filePath, content] of Object.entries(files)) {
+    if ((filePath.endsWith('.jsx') || filePath.endsWith('.tsx')) && typeof content === 'string') {
+      let fixed = fixUnclosedReturnFragment(content);
+      // Fix incorrect tokens.css relative import in component files (src/components/*.jsx etc.)
+      if (fixed.includes("'./tokens.css'") || fixed.includes('"./tokens.css"')) {
+        fixed = fixed.replace(/['"]\.\/tokens\.css['"]/g, "'../styles/tokens.css'");
+        console.log(`[finalPass] Fixed tokens.css import path in ${filePath}`);
+      }
+      if (fixed !== content) {
+        files[filePath] = fixed;
+        console.log(`[finalPass] Fixed unclosed fragment in ${filePath}`);
+      }
+    }
+  }
+
+  // CSS post-processing: fix common layout/rendering bugs
+  for (const [filePath, content] of Object.entries(files)) {
+    if (filePath.endsWith('.css') && typeof content === 'string') {
+      let fixed = content;
+
+      // Fix 1: layout-main must NOT have max-width or padding (sections are full-width)
+      fixed = fixed.replace(
+        /\.layout-main\s*\{([^}]*)\}/g,
+        (match, body) => {
+          // Strip max-width and horizontal padding from layout-main
+          let cleaned = body
+            .replace(/max-width\s*:[^;]+;?\s*/g, '')
+            .replace(/padding\s*:\s*[^;]+;?\s*/g, '')
+            .replace(/padding-left\s*:[^;]+;?\s*/g, '')
+            .replace(/padding-right\s*:[^;]+;?\s*/g, '');
+          // Ensure width:100% is present
+          if (!/width\s*:/.test(cleaned)) cleaned = 'width: 100%;\n  ' + cleaned;
+          return `.layout-main {${cleaned}}`;
+        }
+      );
+
+      // Fix 2: find any CSS class that is used as className in a DecryptedText component
+      // and strip display:block from it (it gets applied to individual character <span> elements)
+      // Strategy: find JSX files that use DecryptedText, extract className values, then
+      // for those classes in CSS, remove any display:block/flex/grid rules
+      const decryptedClassNames = new Set();
+      for (const [jsxPath, jsxContent] of Object.entries(files)) {
+        if ((jsxPath.endsWith('.jsx') || jsxPath.endsWith('.tsx')) && typeof jsxContent === 'string') {
+          if (jsxContent.includes('DecryptedText') || jsxContent.includes('BlurText')) {
+            // Extract className="..." values from DecryptedText/BlurText usage
+            const classMatches = jsxContent.matchAll(/(?:DecryptedText|BlurText)[^>]*className=["']([^"']+)["']/g);
+            for (const m of classMatches) {
+              m[1].split(/\s+/).forEach(cls => decryptedClassNames.add(cls));
+            }
+          }
+        }
+      }
+      if (decryptedClassNames.size > 0) {
+        for (const cls of decryptedClassNames) {
+          // Remove display:block/flex/grid from these classes (they are applied per-character)
+          const classRegex = new RegExp(`(\\.${cls}\\s*\\{[^}]*)display\\s*:\\s*(?:block|flex|grid|inline-block)\\s*;?`, 'g');
+          const before = fixed;
+          fixed = fixed.replace(classRegex, '$1/* display:block removed — class used per-character in DecryptedText/BlurText */');
+          if (fixed !== before) {
+            console.log(`[cssPass] Removed display:block from .${cls} (used in DecryptedText/BlurText)`);
+          }
+        }
+      }
+
+      if (fixed !== content) {
+        files[filePath] = fixed;
+      }
+    }
+  }
 
   // Post-generation design quality validation
   const evaluation = evaluateDesign(files, tokens, scenePlan);
@@ -546,7 +618,8 @@ ${isReact ? `Import Header, Footer, tokens.css.
 export default function Layout({ children }) {
   return (<><Header /><main className="layout-main">{children}</main><Footer /></>);
 }
-Add <style> with: .layout-main { min-height: calc(100vh - 140px); }` : 'Angular: router-outlet between Header and Footer.'}
+Add <style> with: .layout-main { width: 100%; min-height: calc(100vh - 140px); }
+CRITICAL: layout-main must be width:100% with NO max-width and NO horizontal padding — sections control their own width and spacing internally.` : 'Angular: router-outlet between Header and Footer.'}
 Return ONLY raw file. No markdown fences.`,
     },
     {
@@ -580,6 +653,7 @@ ${heroVisual === 'abstract-grid' ? '- Subtle CSS grid/dot pattern overlay + geom
 ${heroVisual === 'minimal'       ? '- Zero visual decoration. Typography IS the design. Maximum white space.' : ''}
 
 HERO MOOD: ${creativeDirection.heroMood || `Premium ${archetype} feel — ${tokens.brandPersonality} and ${toneOfVoice}`}
+
 
 CONTENT (NO placeholders — write real brand copy):
 - Badge: pill with "✦ ${tokens.tagline || tokens.brandName}" — rgba(primary,0.1) bg, border, border-radius 9999px
@@ -1048,6 +1122,77 @@ const JSX_SYSTEM = (isReact) => `You are a world-class ${isReact ? 'React/JSX' :
 - NO placeholder text like "Feature title" or "Description here"
 - Text content belongs in JSX, not data arrays with JSX nodes
 
+
+═══ REACTBITS ANIMATED COMPONENTS (mandatory — pre-installed in src/bits/) ═══
+These replace plain static text and white-box layouts. Import from '../bits/ComponentName'.
+
+TEXT EFFECTS — use on ALL major headings and taglines:
+
+  import BlurText from '../bits/BlurText';
+  // Scroll blur-to-clear word reveal. Use on EVERY hero <h1> as the primary heading element.
+  <BlurText text="Your Headline" animateBy="words" delay={120} direction="top" className="hero-heading" />
+
+  import GradientText from '../bits/GradientText';
+  // Animated color gradient sweep inline inside headings — wrap 1–3 key words.
+  <h1 className="hero-heading">
+    Build <GradientText colors={['#6d28d9','#ec4899','#f59e0b','#6d28d9']} animationSpeed={5}>Stunning</GradientText> Websites
+  </h1>
+
+  import ShinyText from '../bits/ShinyText';
+  // Metallic sheen. Use on badge/pill/label text and tagline spans.
+  <ShinyText text="✦ Premium Quality" speed={3} color="#a78bfa" shineColor="#ffffff" className="hero-badge" />
+
+  import DecryptedText from '../bits/DecryptedText';
+  // Scramble → reveal on scroll. Perfect for tech/finance/security section headings.
+  <DecryptedText text="Enterprise Security" animateOn="view" sequential={true} speed={40} className="section-heading" />
+
+BACKGROUNDS — add ONE to the hero section (section must have position:relative):
+
+  import Particles from '../bits/Particles';
+  // 3D WebGL particle cloud. Best for tech, SaaS, finance, crypto brands.
+  <section className="hero-section" style={{ position: 'relative', overflow: 'hidden' }}>
+    <Particles particleColors={['#6d28d9','#a78bfa','#ec4899']} particleCount={160} speed={0.07} alphaParticles={true} />
+    <div className="hero-content" style={{ position: 'relative', zIndex: 1 }}>...</div>
+  </section>
+
+  import Aurora from '../bits/Aurora';
+  // Flowing aurora gradient. Best for beauty, wellness, creative, luxury brands.
+  <section className="hero-section" style={{ position: 'relative', overflow: 'hidden' }}>
+    <Aurora colorStops={['#5227FF','#ec4899','#f59e0b']} amplitude={1.2} speed={0.35} />
+    <div className="hero-content" style={{ position: 'relative', zIndex: 1 }}>...</div>
+  </section>
+
+SCROLL REVEAL — wrap every card/item in staggered FadeIn:
+
+  import FadeIn from '../bits/FadeIn';
+  {featuresData.map((feat, i) => (
+    <FadeIn key={i} delay={i * 0.12} direction="up">
+      <div className="feat-card">...</div>
+    </FadeIn>
+  ))}
+
+INTERACTIVE CARDS — replace plain <div className="feat-card"> with SpotlightCard:
+
+  import SpotlightCard from '../bits/SpotlightCard';
+  // Mouse-tracking spotlight glow. Use on feature cards, pricing cards, testimonial cards.
+  <FadeIn key={i} delay={i * 0.12} direction="up">
+    <SpotlightCard className="feat-card" spotlightColor="rgba(109,40,217,0.15)">
+      <div className="feat-icon">...</div>
+      <h3 className="feat-title">...</h3>
+      <p className="feat-desc">...</p>
+    </SpotlightCard>
+  </FadeIn>
+
+MANDATORY RULES (violations = broken output):
+✓ ALWAYS use BlurText OR a heading with GradientText inline for the hero <h1>
+✓ ALWAYS add Particles OR Aurora to the hero section background
+✓ ALWAYS wrap feature/stat/testimonial cards in <FadeIn> with staggered delay
+✓ ALWAYS use SpotlightCard instead of plain divs for feature/pricing/testimonial cards
+✓ hero-content div: position: relative; z-index: 1 (renders above WebGL canvas)
+✓ Never import bits components in Layout.jsx — only in Hero, Features, Stats, etc.
+✓ GradientText wraps INLINE text inside <h1>/<h2> — it is a <span>, not a block
+✓ SpotlightCard is the outer wrapper — pass className (e.g. "feat-card") directly to it
+
 ═══ JSX VALIDITY (critical) ═══
 - Return ONLY raw file. No markdown fences. First char = first char of file.
 - COMPLETE file — no stubs, no TODOs
@@ -1075,10 +1220,26 @@ const CSS_SYSTEM = `You are a world-class CSS designer creating premium, agency-
 - Scroll animations: use @keyframes fadeUp { from { opacity:0; transform:translateY(24px) } to { opacity:1; transform:none } }
 - Decorative elements: ::before / ::after pseudo-elements for background accents, never extra DOM nodes
 
+═══ REACTBITS COMPATIBILITY ═══
+- hero-section: must have position:relative + overflow:hidden (Particles/Aurora are position:absolute inside)
+- hero-content: position:relative; z-index:1 (so text renders above WebGL canvas)
+- .hero-heading used by BlurText — style as display:block; font-size; font-weight; color ONLY (motion handles animation)
+- .hero-badge used by ShinyText — style the container span: font-size, letter-spacing, padding (do NOT set color or background — motion handles the gradient)
+- FadeIn wraps cards — the outer div gets opacity/transform via inline style, so only set layout CSS (width, padding, margin) on .feat-card, not animation CSS
+- Do NOT add fadeUp animations to elements wrapped in FadeIn or BlurText — they animate themselves
+- CRITICAL — DecryptedText className rule: DecryptedText applies className to EACH INDIVIDUAL CHARACTER <span>. NEVER use display:block, display:flex, display:grid, or writing-mode on any class passed as className to DecryptedText. Only use font-size, font-weight, color, letter-spacing, background + -webkit-background-clip for gradient text. Example: .section-heading-char { font-size: inherit; font-weight: inherit; color: inherit; } — the heading sizing belongs on the PARENT <h2> element, not on the DecryptedText className prop.
+- Stats/features grids: use fixed column counts (e.g. repeat(4,1fr) for 4 stats, repeat(3,1fr) for 3 features) NOT auto-fit with minmax — auto-fit causes orphan cards on their own row
+
+═══ LAYOUT RULES ═══
+- Every section (hero, features, stats, testimonials, CTA) must be width:100% with no max-width on the section itself
+- Use a .container div INSIDE sections for content centering: max-width:var(--container); margin:0 auto; padding:0 24px
+- layout-main has NO max-width and NO padding — full-width is mandatory
+
 ═══ ANTI-PATTERNS ═══
 - No gray-on-gray (≥4.5:1 contrast always)
 - No @import statements (fonts loaded via global.css)
 - No flat same-color sections back to back
+- Never set display:block on a class used as className prop in DecryptedText/BlurText/ShinyText/GradientText animated components
 
 Return ONLY raw CSS. First char = first char of CSS. No markdown fences.`;
 
@@ -1113,6 +1274,7 @@ async function generateSingleFile(prompt, framework, ai, onLog = () => {}, cssCo
   // Apply mechanical JSX fixes
   jsx = fixCssVarProps(jsx);
   jsx = fixStringLiterals(jsx);
+  jsx = fixUnclosedReturnFragment(jsx);
   jsx = fixReturnFragment(jsx);
   jsx = fixJsxTagBalance(jsx);
 
@@ -1124,6 +1286,7 @@ async function generateSingleFile(prompt, framework, ai, onLog = () => {}, cssCo
     // Re-apply mechanical fixes after AI repair
     jsx = fixCssVarProps(jsx);
     jsx = fixStringLiterals(jsx);
+    jsx = fixUnclosedReturnFragment(jsx);
     jsx = fixReturnFragment(jsx);
     jsx = fixJsxTagBalance(jsx);
   }
@@ -1304,6 +1467,63 @@ function fixStringLiterals(code) {
   return fixedLines.join('\n');
 }
 
+// ─── Fix 1b: Unclosed return fragment ────────────────────────────────────────
+// Catches: return (<> ... ) without </> before );
+// Pattern: <> is opened inside return(...) but never closed with </>
+
+function fixUnclosedReturnFragment(code) {
+  // Count <> and </> occurrences (only bare fragments, not <div> etc.)
+  const opens  = (code.match(/(?<![a-zA-Z0-9])<>(?!\s*\S*=)/g) || []).length;
+  const closes = (code.match(/<\/>/g) || []).length;
+  if (opens <= closes) return code; // balanced or already fine
+
+  const lines = code.split('\n');
+  let fixed = false;
+
+  // For each return ( <> block that has no matching </>, insert </> before );
+  for (let i = 0; i < lines.length; i++) {
+    if (!/^\s*return\s*\(/.test(lines[i])) continue;
+
+    // Check if next non-blank line starts with <>
+    let fragOpen = -1;
+    for (let j = i + 1; j < lines.length; j++) {
+      const trimmed = lines[j].trim();
+      if (!trimmed) continue;
+      if (trimmed === '<>') { fragOpen = j; break; }
+      break;
+    }
+    if (fragOpen === -1) continue;
+
+    // Find the matching ); that closes this return (
+    let depth = 1;
+    let closingIdx = -1;
+    for (let j = i + 1; j < lines.length; j++) {
+      // skip string contents roughly
+      for (const ch of lines[j]) {
+        if (ch === '(') depth++;
+        else if (ch === ')') { depth--; if (depth === 0) { closingIdx = j; break; } }
+      }
+      if (closingIdx !== -1) break;
+    }
+    if (closingIdx === -1) continue;
+
+    // Check whether the OUTER </> is already present by counting opens vs closes
+    const block = lines.slice(fragOpen, closingIdx).join('\n');
+    const blockOpens  = (block.match(/(?<![a-zA-Z0-9])<>(?!\s*\S*=)/g) || []).length;
+    const blockCloses = (block.match(/<\/>/g) || []).length;
+    if (blockOpens <= blockCloses) continue; // outer fragment already closed
+
+    // Insert </> right before the closing );
+    const closeIndent = lines[fragOpen].match(/^(\s*)/)?.[1] ?? '  ';
+    lines.splice(closingIdx, 0, `${closeIndent}</>`);
+    console.log(`[fixUnclosedReturnFragment] Inserted </> before line ${closingIdx}`);
+    fixed = true;
+    i++; // skip ahead past this return block
+  }
+
+  return fixed ? lines.join('\n') : code;
+}
+
 // ─── Fix 2: Return fragment wrapper ──────────────────────────────────────────
 // Catches: "Adjacent JSX elements must be wrapped in an enclosing tag"
 // Pattern: return ( <style>...</style> <section>...</section> ) without <> wrapper
@@ -1373,6 +1593,15 @@ function detectSyntaxIssues(code) {
   // 3. Adjacent JSX still present after fixReturnFragment (edge case)
   if (/return\s*\(\s*\r?\n\s*<style>/.test(code) && !/return\s*\(\s*\r?\n\s*<>/.test(code)) {
     issues.push('adjacent JSX elements — <style> without fragment wrapper');
+  }
+
+  // 3b. Unclosed JSX fragment — <> without matching </>
+  {
+    const opens  = (code.match(/(?<![a-zA-Z0-9])<>(?!\s*\S*=)/g) || []).length;
+    const closes = (code.match(/<\/>/g) || []).length;
+    if (opens > closes) {
+      issues.push(`unclosed JSX fragment — ${opens} <> but only ${closes} </>`);
+    }
   }
 
   // 4. Semantic tag imbalance (section/main/article — footer/header handled by fixJsxTagBalance)
@@ -1690,6 +1919,16 @@ function buildReactBoilerplate(tokens, siteData, pages) {
       .replaceAll('{{BG_RGB}}',           hexToRGB(tokens.bgColor        || '#ffffff'))
       .replaceAll('{{SECONDARY_RGB}}',    hexToRGB(tokens.secondaryColor || '#818cf8'))
       .replaceAll('{{BORDER_RGB}}',       hexToRGB(tokens.borderColor    || '#e5e7eb')),
+
+    // ── ReactBits animated components — bundled with every project ────────
+    'src/bits/BlurText.jsx':      readTemplate('react', 'src/bits/BlurText.jsx'),
+    'src/bits/FadeIn.jsx':        readTemplate('react', 'src/bits/FadeIn.jsx'),
+    'src/bits/ShinyText.jsx':     readTemplate('react', 'src/bits/ShinyText.jsx'),
+    'src/bits/DecryptedText.jsx': readTemplate('react', 'src/bits/DecryptedText.jsx'),
+    'src/bits/GradientText.jsx':  readTemplate('react', 'src/bits/GradientText.jsx'),
+    'src/bits/Aurora.jsx':        readTemplate('react', 'src/bits/Aurora.jsx'),
+    'src/bits/Particles.jsx':     readTemplate('react', 'src/bits/Particles.jsx'),
+    'src/bits/SpotlightCard.jsx': readTemplate('react', 'src/bits/SpotlightCard.jsx'),
   };
 }
 

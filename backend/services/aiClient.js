@@ -9,6 +9,7 @@ const SUPPORTED_MODELS = {
   'claude-sonnet-4-6':      'anthropic',
   'claude-haiku-4-5':       'anthropic',
   // Google
+  'gemini-2.5-pro':         'gemini',
   'gemini-2.5-flash':       'gemini',
   'gemini-2.5-flash-lite':  'gemini',
   // OpenAI
@@ -30,6 +31,7 @@ const MODEL_MAX_TOKENS = {
   'claude-opus-4-5':         16000,
   'claude-sonnet-4-6':       16000,
   'claude-haiku-4-5':        8192,
+  'gemini-2.5-pro':          65536,
   'gemini-2.5-flash':        65536,
   'gemini-2.5-flash-lite':   8192,
   'gpt-4o':                  16384,
