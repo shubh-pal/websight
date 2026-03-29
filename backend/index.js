@@ -12,9 +12,43 @@ const authRouter = require('./routes/auth');
 const redesignRouter = require('./routes/redesign');
 const snapshotRouter = require('./routes/snapshot');
 const jobsRouter = require('./routes/jobs');
+const publishRouter = require('./routes/publish');
+const contactRouter = require('./routes/contact');
+const { findJobIdBySubdomain, getDistDir, registerSubdomain } = require('./services/publisher');
+const path = require('path');
+const fs = require('fs');
+const expressStatic = require('express').static;
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+
+// ── Subdomain serving (must run before session/auth middleware) ──────────────
+// Serves published projects on [slug].localhost:PORT or [slug].APP_DOMAIN
+app.use((req, res, next) => {
+  const host = req.hostname; // e.g. "stripe.localhost"
+  const parts = host.split('.');
+  // Only intercept if there's a subdomain prefix (2+ parts, first part isn't www/api/localhost)
+  if (parts.length >= 2 && !['www', 'api'].includes(parts[0]) && parts[0] !== 'localhost') {
+    const subdomain = parts[0];
+    const jobId = findJobIdBySubdomain(subdomain);
+    if (jobId) {
+      const distDir = getDistDir(jobId);
+      // Serve static assets
+      expressStatic(distDir)(req, res, () => {
+        // SPA fallback — serve index.html for unknown paths
+        const indexFile = path.join(distDir, 'index.html');
+        if (fs.existsSync(indexFile)) {
+          res.sendFile(indexFile);
+        } else {
+          res.status(503).send('Site is still building. Please wait a moment and refresh.');
+        }
+      });
+      return;
+    }
+  }
+  next();
+});
+
 
 // Security middleware
 app.use(helmet());
@@ -62,6 +96,8 @@ app.use('/auth', authRouter);
 app.use('/api/redesign', redesignLimiter, redesignRouter);
 app.use('/api/snapshot', snapshotRouter);
 app.use('/api/jobs', jobsRouter);
+app.use('/api/jobs', publishRouter);
+app.use('/api/contact', contactRouter);
 
 // Health check endpoint
 app.get('/api/health', (_, res) => res.json({ status: 'ok', version: '1.0.0' }));

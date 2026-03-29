@@ -37,6 +37,16 @@ if (fs.existsSync(JOBS_FILE)) {
       }
     });
     console.log(`[jobStore] Loaded ${jobs.size} jobs, ${urlCache.size} cached URLs`);
+
+    // Re-register published subdomains so the subdomain middleware works after restart
+    try {
+      const { registerSubdomain } = require('./publisher');
+      for (const [id, job] of jobs) {
+        if (job.publishedSubdomain && job.publishStatus === 'live') {
+          registerSubdomain(job.publishedSubdomain, id);
+        }
+      }
+    } catch (_) {}
   } catch (err) {
     console.error('Failed to load jobs.json:', err.message);
   }

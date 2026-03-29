@@ -11,11 +11,12 @@ export default function Result() {
   const framework = params.get('fw') || 'react';
   const modelParam = params.get('model') || '';
 
-  const [job, setJob]           = useState(null);
-  const [logs, setLogs]         = useState([]);
-  const [fileMap, setFileMap]   = useState(null);
-  const [view, setView]         = useState('preview'); // 'preview' | 'tokens' | 'logs'
-  const [panelOpen, setPanelOpen] = useState(true); // top info panel collapsed/expanded
+  const [job, setJob]             = useState(null);
+  const [logs, setLogs]           = useState([]);
+  const [fileMap, setFileMap]     = useState(null);
+  const [view, setView]           = useState('preview');
+  const [panelOpen, setPanelOpen] = useState(true);
+  const [publish, setPublish]     = useState({ status: null, url: null, error: null }); // null | 'building' | 'live' | 'error'
 
   const logsEndRef = useRef(null);
   const sseRef     = useRef(null);
@@ -41,8 +42,21 @@ export default function Result() {
         if (data.error) return;
         setJob(prev => ({ ...prev, ...data }));
         if (data.logs) setLogs(data.logs);
-        // Load files but keep panel OPEN — user wants to see the token banner
         if (data.status === 'done') loadFiles();
+        // Restore publish state from stored job data
+        if (data.publishStatus) {
+          // Fetch canonical URL from backend (handles local vs production correctly)
+          fetch(`/api/jobs/${jobId}/publish-status`)
+            .then(r => r.json())
+            .then(ps => {
+              setPublish({
+                status: ps.publishStatus,
+                url: ps.url,
+                error: ps.publishError || null,
+              });
+            })
+            .catch(() => {});
+        }
       })
       .catch(() => {});
   }, [jobId, loadFiles]);
@@ -90,6 +104,34 @@ export default function Result() {
         body: JSON.stringify({ command }),
       });
     } catch (_) {}
+  }
+
+  async function handlePublish() {
+    if (publish.status === 'building') return;
+    if (publish.status === 'live' && publish.url) { window.open(publish.url, '_blank'); return; }
+    try {
+      setPublish({ status: 'building', url: null, error: null });
+      const res = await fetch(`/api/jobs/${jobId}/publish`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Publish failed');
+      setPublish({ status: 'building', url: data.url, error: null });
+      // Poll for completion
+      const poll = setInterval(async () => {
+        try {
+          const r = await fetch(`/api/jobs/${jobId}/publish-status`);
+          const d = await r.json();
+          if (d.publishStatus === 'live') {
+            setPublish({ status: 'live', url: d.url, error: null });
+            clearInterval(poll);
+          } else if (d.publishStatus === 'error') {
+            setPublish({ status: 'error', url: null, error: d.publishError });
+            clearInterval(poll);
+          }
+        } catch (_) {}
+      }, 3000);
+    } catch (err) {
+      setPublish({ status: 'error', url: null, error: err.message });
+    }
   }
 
   const isDone    = job?.status === 'done';
@@ -155,10 +197,28 @@ export default function Result() {
         )}
 
         {isDone && (
-          <a href={`/api/jobs/${jobId}/download`} style={s.downloadBtn}>
-            <DownloadIcon />
-            Download ZIP
-          </a>
+          <>
+            {/* Publish button */}
+            <button
+              onClick={handlePublish}
+              disabled={publish.status === 'building'}
+              title={publish.status === 'live' ? `Open: ${publish.url}` : 'Publish to subdomain'}
+              style={{
+                ...s.publishBtn,
+                ...(publish.status === 'live' ? s.publishBtnLive : {}),
+                ...(publish.status === 'building' ? s.publishBtnBuilding : {}),
+                ...(publish.status === 'error' ? s.publishBtnError : {}),
+              }}
+            >
+              {publish.status === 'building' && <span style={s.spinnerXs} />}
+              {publish.status === 'live' ? '🌐 View Live' : publish.status === 'building' ? 'Building…' : publish.status === 'error' ? '⚠ Retry' : '🚀 Publish'}
+            </button>
+            {/* Download button */}
+            <a href={`/api/jobs/${jobId}/download`} style={s.downloadBtn}>
+              <DownloadIcon />
+              Download ZIP
+            </a>
+          </>
         )}
       </header>
 
@@ -442,6 +502,47 @@ const s = {
     transition: 'all 0.15s',
     flexShrink: 0,
     textDecoration: 'none',
+  },
+  publishBtn: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+    fontSize: 13,
+    color: '#fff',
+    background: 'var(--violet)',
+    border: 'none',
+    borderRadius: 7,
+    padding: '7px 14px',
+    fontWeight: 600,
+    cursor: 'pointer',
+    transition: 'all 0.2s',
+    flexShrink: 0,
+  },
+  publishBtnLive: {
+    background: 'rgba(30,245,160,0.15)',
+    color: '#1ef5a0',
+    border: '1px solid rgba(30,245,160,0.4)',
+  },
+  publishBtnBuilding: {
+    background: 'rgba(124,106,247,0.25)',
+    color: 'var(--violet-bright)',
+    cursor: 'not-allowed',
+    opacity: 0.8,
+  },
+  publishBtnError: {
+    background: 'rgba(255,80,80,0.15)',
+    color: '#ff5050',
+    border: '1px solid rgba(255,80,80,0.35)',
+  },
+  spinnerXs: {
+    width: 11,
+    height: 11,
+    borderRadius: '50%',
+    border: '2px solid rgba(124,106,247,0.3)',
+    borderTopColor: 'var(--violet-bright)',
+    animation: 'spin 0.7s linear infinite',
+    display: 'inline-block',
+    flexShrink: 0,
   },
   progressBanner: {
     padding: '20px 40px',

@@ -39,10 +39,37 @@ export function AuthProvider({ children }) {
     }
   }
 
+  async function login(email, password) {
+    const res = await fetch('/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+      credentials: 'include',
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Login failed');
+    setUser(data);
+    return data;
+  }
+
+  async function signup(email, password, name) {
+    const res = await fetch('/auth/signup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password, name }),
+      credentials: 'include',
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Signup failed');
+    return data;
+  }
+
   const value = {
     user,
     loading,
     logout,
+    login,
+    signup,
     loginUrl: '/auth/google',
   };
 

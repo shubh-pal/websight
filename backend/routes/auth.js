@@ -1,6 +1,7 @@
-const express = require('express');
 const passport = require('passport');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
+const LocalStrategy = require('passport-local').Strategy;
+const bcrypt = require('bcryptjs');
 const db = require('../db');
 const requireAuth = require('../middleware/requireAuth');
 const { encrypt, decrypt, getHint } = require('../services/keyEncryption');
@@ -26,6 +27,19 @@ passport.use(new GoogleStrategy({
     // Try to upsert user in database
     if (db.pool) {
       try {
+        // First check if user with this email exists (maybe they signed up via local auth)
+        const emailCheck = await db.query('SELECT * FROM users WHERE email = $1', [email]);
+        if (emailCheck.rows.length > 0) {
+          const user = emailCheck.rows[0];
+          // If the user hasn't linked a google_id, link it now
+          if (!user.google_id) {
+            await db.query('UPDATE users SET google_id = $1, avatar_url = $2 WHERE id = $3', [googleId, avatarUrl, user.id]);
+            user.google_id = googleId;
+            user.avatar_url = avatarUrl;
+          }
+          return done(null, user);
+        }
+
         const result = await db.query(
           `INSERT INTO users (google_id, email, name, avatar_url, plan)
            VALUES ($1, $2, $3, $4, 'free')
@@ -49,6 +63,37 @@ passport.use(new GoogleStrategy({
       const user = { id: googleId, google_id: googleId, email, name, avatar_url: avatarUrl, plan: 'free' };
       return done(null, user);
     }
+  } catch (err) {
+    return done(err);
+  }
+}));
+
+// Configure Passport Local Strategy
+passport.use(new LocalStrategy({
+  usernameField: 'email',
+  passwordField: 'password'
+}, async (email, password, done) => {
+  try {
+    if (!db.pool) return done(null, false, { message: 'Database not initialized' });
+
+    const result = await db.query('SELECT * FROM users WHERE email = $1', [email]);
+    if (result.rows.length === 0) {
+      return done(null, false, { message: 'Incorrect email or password.' });
+    }
+
+    const user = result.rows[0];
+
+    // If no password hash, they likely signed up via Google only
+    if (!user.password_hash) {
+      return done(null, false, { message: 'Please sign in with Google.' });
+    }
+
+    const isMatch = await bcrypt.compare(password, user.password_hash);
+    if (!isMatch) {
+      return done(null, false, { message: 'Incorrect email or password.' });
+    }
+
+    return done(null, user);
   } catch (err) {
     return done(err);
   }
@@ -99,6 +144,71 @@ router.get('/google/callback',
     res.redirect(`${frontendUrl}/dashboard`);
   }
 );
+
+// POST /auth/signup — Create a new local user
+router.post('/signup', async (req, res) => {
+  const { email, password, name } = req.body;
+
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Email and password are required' });
+  }
+
+  if (password.length < 6) {
+    return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  }
+
+  if (!db.pool) return res.status(503).json({ error: 'Database not initialized' });
+
+  try {
+    // Check if user exists
+    const check = await db.query('SELECT * FROM users WHERE email = $1', [email]);
+    if (check.rows.length > 0) {
+      const user = check.rows[0];
+      if (user.password_hash) {
+        return res.status(400).json({ error: 'Email already registered' });
+      } else if (user.google_id) {
+        // User already has a Google account — tell them to link a password or just login via Google
+        // For simplicity, we'll let them add a password here
+        const salt = await bcrypt.genSalt(10);
+        const hash = await bcrypt.hash(password, salt);
+        await db.query('UPDATE users SET password_hash = $1, name = COALESCE($2, name) WHERE id = $3', [hash, name, user.id]);
+        return res.json({ message: 'Password added to your existence. Please log in.' });
+      }
+    }
+
+    const salt = await bcrypt.genSalt(10);
+    const hash = await bcrypt.hash(password, salt);
+
+    const result = await db.query(
+      'INSERT INTO users (email, password_hash, name, plan) VALUES ($1, $2, $3, $4) RETURNING id, email, name, plan',
+      [email, hash, name || email.split('@')[0], 'free']
+    );
+
+    res.json({ message: 'Signup successful! Please log in.' });
+  } catch (err) {
+    console.error('[auth] Signup error:', err.message);
+    res.status(500).json({ error: 'Unexpected error during signup' });
+  }
+});
+
+// POST /auth/login — Local login
+router.post('/login', (req, res, next) => {
+  passport.authenticate('local', (err, user, info) => {
+    if (err) return res.status(500).json({ error: 'Internal server error' });
+    if (!user) return res.status(401).json({ error: info.message || 'Invalid credentials' });
+
+    req.logIn(user, (err) => {
+      if (err) return res.status(500).json({ error: 'Login failed' });
+      return res.json({
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        avatarUrl: user.avatar_url,
+        plan: user.plan
+      });
+    });
+  })(req, res, next);
+});
 
 // GET /auth/me – Return current user
 router.get('/me', (req, res) => {
