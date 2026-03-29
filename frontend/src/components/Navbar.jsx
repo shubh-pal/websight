@@ -12,7 +12,7 @@ export default function Navbar() {
 
   const avatarUrl = user?.avatarUrl;
   const userName = user?.name || 'User';
-  const plan = user?.plan || 'FREE';
+
   const firstLetter = userName.charAt(0).toUpperCase();
 
   return (
@@ -43,13 +43,6 @@ export default function Navbar() {
             {/* User name */}
             <span style={styles.userName}>{userName}</span>
 
-            {/* Plan badge */}
-            <span style={{
-              ...styles.planBadge,
-              ...(plan === 'PRO' ? styles.planBadgePro : styles.planBadgeFree),
-            }}>
-              {plan}
-            </span>
 
             {/* Sign out button */}
             <button onClick={handleLogout} style={styles.signOutBtn}>
@@ -144,24 +137,6 @@ const styles = {
     fontSize: 13,
     color: 'var(--text)',
     fontWeight: 500,
-  },
-  planBadge: {
-    fontSize: 11,
-    fontFamily: 'var(--font-mono)',
-    fontWeight: 600,
-    padding: '4px 9px',
-    borderRadius: 5,
-    letterSpacing: '0.02em',
-  },
-  planBadgeFree: {
-    background: 'rgba(124,106,247,0.12)',
-    color: 'var(--violet-bright)',
-    border: '1px solid rgba(124,106,247,0.3)',
-  },
-  planBadgePro: {
-    background: 'rgba(0,212,232,0.12)',
-    color: 'var(--cyan)',
-    border: '1px solid rgba(0,212,232,0.3)',
   },
   signOutBtn: {
     fontSize: 12,

@@ -311,8 +311,16 @@ async function getUserJobs(userId) {
   }
 }
 
+/** Synchronous memory-only lookup. Use for internal pipeline code where the job
+ *  is guaranteed to be in-memory (e.g. replayFromCache, editor, updateJob callers).
+ *  Returns null if not found — never hits the DB.
+ */
+function getJobSync(id) {
+  return jobs.get(id) ?? null;
+}
+
 module.exports = {
-  createJob, updateJob, getJob, addLog,
+  createJob, updateJob, getJob, getJobSync, addLog,
   addSSEClient, removeSSEClient,
   listJobs, loadFilesFromDisk,
   findCachedJob, registerUrlCache,

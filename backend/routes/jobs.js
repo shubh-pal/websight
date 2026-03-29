@@ -27,8 +27,8 @@ router.get('/', requireAuth, async (req, res) => {
 });
 
 // GET /api/jobs/:id — full job state (for initial load / polling fallback)
-router.get('/:id', (req, res) => {
-  const job = getJob(req.params.id);
+router.get('/:id', async (req, res) => {
+  const job = await getJob(req.params.id);
   if (!job) return res.status(404).json({ error: 'Job not found' });
 
   // Don't send raw file contents in list view (can be huge)
@@ -37,8 +37,8 @@ router.get('/:id', (req, res) => {
 });
 
 // GET /api/jobs/:id/events — SSE stream of real-time job updates
-router.get('/:id/events', (req, res) => {
-  const job = getJob(req.params.id);
+router.get('/:id/events', async (req, res) => {
+  const job = await getJob(req.params.id);
   if (!job) return res.status(404).json({ error: 'Job not found' });
 
   res.setHeader('Content-Type', 'text/event-stream');
@@ -65,11 +65,11 @@ router.get('/:id/events', (req, res) => {
 });
 
 // GET /api/jobs/:id/files — returns the full file map (code content)
-router.get('/:id/files', (req, res) => {
-  const job = getJob(req.params.id);
+router.get('/:id/files', async (req, res) => {
+  const job = await getJob(req.params.id);
   if (!job) return res.status(404).json({ error: 'Job not found' });
   
-  const files = loadFilesFromDisk(req.params.id);
+  const files = await Promise.resolve(loadFilesFromDisk(req.params.id));
   if (!files) return res.status(202).json({ message: 'Not ready yet' });
   
   res.json({ files, tree: job.tree, fileList: job.fileList });

@@ -52,3 +52,14 @@ CREATE TABLE IF NOT EXISTS subscriptions (
   current_period_end TIMESTAMPTZ,
   UNIQUE(user_id)
 );
+
+-- API keys table (BYOK — bring your own key)
+-- Keys are stored AES-256-GCM encrypted; only the hint (last 4 chars) is readable.
+CREATE TABLE IF NOT EXISTS api_keys (
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  provider TEXT NOT NULL,       -- 'anthropic' | 'gemini'
+  encrypted_key TEXT NOT NULL,  -- AES-256-GCM: iv_hex:authTag_hex:ciphertext_hex
+  key_hint TEXT,                -- last 4 chars for display, e.g. "a3F9"
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (user_id, provider)
+);

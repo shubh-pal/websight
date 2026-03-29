@@ -8,8 +8,8 @@ const { fetchAllComponentReferences, buildReferenceBlock } = require('./componen
  * Master pipeline: analyze → creativeDirection → scenePlan → components → pages → boilerplate
  * model: 'gemini-2.5-flash' | 'claude-opus-4-5' | etc.
  */
-async function generateRedesign(siteData, framework = 'react', onProgress = () => {}, model = 'gemini-2.5-pro') {
-  const ai = createAIClient(model);
+async function generateRedesign(siteData, framework = 'react', onProgress = () => {}, model = 'gemini-2.5-pro', keyOverrides = {}) {
+  const ai = createAIClient(model, keyOverrides);
 
   // ── Design Intelligence: run before any AI call so every prompt benefits ──
   onProgress(1, 'Loading design intelligence…');

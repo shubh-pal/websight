@@ -4,8 +4,10 @@ const { scrapeURL } = require('../services/scraper');
 const { generateRedesign } = require('../services/claude');
 const { buildProject } = require('../services/projectBuilder');
 const { createZip } = require('../services/zipper');
-const { createJob, updateJob, addLog, getJob, findCachedJob, registerUrlCache, loadFilesFromDisk } = require('../services/jobStore');
+const { createJob, updateJob, addLog, getJob, getJobSync, findCachedJob, registerUrlCache, loadFilesFromDisk } = require('../services/jobStore');
 const requireAuth = require('../middleware/requireAuth');
+const { getUserApiKeys } = require('../services/userKeys');
+const { getProvider } = require('../services/aiClient');
 
 const router = express.Router();
 
@@ -17,6 +19,25 @@ router.post('/', requireAuth, async (req, res) => {
   if (!url) return res.status(400).json({ error: 'url is required' });
 
   const userId = req.user?.id;
+
+  // ── Resolve user's API keys and validate ──────────────────────────────────
+  const userKeys = await getUserApiKeys(userId);
+  const provider = getProvider(model);
+
+  // For Anthropic models: require either a user key or server env key
+  if (provider === 'anthropic' && !userKeys.anthropic && !process.env.ANTHROPIC_API_KEY) {
+    return res.status(400).json({
+      error: 'Anthropic API key not configured. Please add your API key in Settings.',
+      missingKey: 'anthropic',
+    });
+  }
+  // For Gemini models: require either a user key or server env key
+  if (provider === 'gemini' && !userKeys.gemini && !process.env.GEMINI_API_KEY) {
+    return res.status(400).json({
+      error: 'Google Gemini API key not configured. Please add your API key in Settings.',
+      missingKey: 'gemini',
+    });
+  }
 
   // ── Cache hit check ────────────────────────────────────────────────────────
   if (!bypassCache) {
@@ -39,12 +60,12 @@ router.post('/', requireAuth, async (req, res) => {
   createJob(jobId, { userId, url, framework, model });
   res.json({ jobId });
 
-  runPipeline(jobId, url, null, framework, model).catch(err => {
+  runPipeline(jobId, url, null, framework, model, userKeys).catch(err => {
     console.error(`[job ${jobId}] unhandled error:`, err);
   });
 });
 
-async function runPipeline(jobId, url, snapshot, framework, model = 'gemini-2.5-pro') {
+async function runPipeline(jobId, url, snapshot, framework, model = 'gemini-2.5-pro', keyOverrides = {}) {
   const targetUrl = url || snapshot?.url;
   try {
     // ── 1 / 5  Scrape ─────────────────────────────────────────────────────
@@ -65,7 +86,8 @@ async function runPipeline(jobId, url, snapshot, framework, model = 'gemini-2.5-
         updateJob(jobId, { step: step + 1, stepName: msg });
         addLog(jobId, msg);
       },
-      model
+      model,
+      keyOverrides
     );
 
     // ── 7 / 7  Build + ZIP ────────────────────────────────────────────────
@@ -110,7 +132,7 @@ async function runPipeline(jobId, url, snapshot, framework, model = 'gemini-2.5-
 // Takes ~2-3 seconds total vs 60-120 seconds for a fresh run.
 
 async function replayFromCache(newJobId, cachedJobId, url, framework, model) {
-  const cached = getJob(cachedJobId);
+  const cached = getJobSync(cachedJobId);
   if (!cached) throw new Error('Cached job not found');
 
   const brand     = cached.tokens?.brandName || 'site';
@@ -177,7 +199,7 @@ async function replayFromCache(newJobId, cachedJobId, url, framework, model) {
   }
 
   // Build a real project on disk for the new jobId using cached files
-  const cachedFiles = loadFilesFromDisk(cachedJobId);
+  const cachedFiles = await Promise.resolve(loadFilesFromDisk(cachedJobId));
   if (!cachedFiles) throw new Error('Cached project files not found on disk');
 
   const projectName = cached.projectName || brand.toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 40);
@@ -211,7 +233,7 @@ router.post('/:id/edit', async (req, res) => {
   const { getJob, updateJob, addLog } = require('../services/jobStore');
   const { applyEdit } = require('../services/editor');
 
-  const job = getJob(id);
+  const job = await getJob(id);
   if (!job) return res.status(404).json({ error: 'Job not found' });
 
   res.json({ success: true, message: 'Edit started' });

@@ -1,221 +1,297 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { useNavigate, Link } from 'react-router-dom';
 import Navbar from '../components/Navbar';
 import { useAuth } from '../contexts/AuthContext';
+
+const PROVIDERS = [
+  {
+    id: 'anthropic',
+    label: 'Anthropic',
+    keyLabel: 'Anthropic API Key',
+    placeholder: 'sk-ant-api03-…',
+    hint: 'Get your key at console.anthropic.com',
+    hintUrl: 'https://console.anthropic.com/settings/keys',
+    models: 'Claude Opus, Sonnet, Haiku',
+    color: '#f5a623',
+  },
+  {
+    id: 'gemini',
+    label: 'Google AI',
+    keyLabel: 'Google AI API Key',
+    placeholder: 'AIza…',
+    hint: 'Get your key at aistudio.google.com',
+    hintUrl: 'https://aistudio.google.com/app/apikey',
+    models: 'Gemini 2.5 Pro, Flash, Flash Lite',
+    color: '#00d4e8',
+  },
+];
 
 export default function Settings() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const [apiKeys, setApiKeys] = useState({
-    anthropic: '',
-    google: '',
-    openai: '',
-    groq: '',
-  });
-  const [showKeys, setShowKeys] = useState({
-    anthropic: false,
-    google: false,
-    openai: false,
-    groq: false,
-  });
-  const [savingKeys, setSavingKeys] = useState(false);
-  const [keySaveMessage, setKeySaveMessage] = useState('');
+
+  // Stored hints from the server (what's already saved)
+  const [savedKeys, setSavedKeys] = useState({}); // { anthropic: { configured: true, hint: '••••a3F9' }, ... }
+
+  // Draft values the user is typing — only present if they're editing that provider
+  const [drafts, setDrafts] = useState({ anthropic: '', gemini: '' });
+  const [showKey, setShowKey]   = useState({ anthropic: false, gemini: false });
+  const [saving, setSaving]     = useState(false);
+  const [saveMsg, setSaveMsg]   = useState('');
+  const [removing, setRemoving] = useState({}); // { anthropic: true/false }
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+
+  // Load existing key hints on mount
+  useEffect(() => {
+    if (!user) return;
+    fetch('/auth/keys', { credentials: 'include' })
+      .then(r => r.ok ? r.json() : {})
+      .then(data => setSavedKeys(data))
+      .catch(() => {});
+  }, [user]);
+
+  async function handleSave() {
+    setSaving(true);
+    setSaveMsg('');
+
+    // Only send providers where the user typed something
+    const body = {};
+    if (drafts.anthropic.trim()) body.anthropic = drafts.anthropic.trim();
+    if (drafts.gemini.trim())    body.gemini    = drafts.gemini.trim();
+
+    if (Object.keys(body).length === 0) {
+      setSaveMsg('No changes to save — enter a key first.');
+      setSaving(false);
+      return;
+    }
+
+    try {
+      const res = await fetch('/auth/keys', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Failed to save');
+      }
+      // Refresh hints
+      const hints = await fetch('/auth/keys', { credentials: 'include' }).then(r => r.json());
+      setSavedKeys(hints);
+      // Clear drafts for saved providers
+      setDrafts(prev => ({
+        anthropic: body.anthropic ? '' : prev.anthropic,
+        gemini:    body.gemini    ? '' : prev.gemini,
+      }));
+      setSaveMsg('Keys saved successfully ✓');
+      setTimeout(() => setSaveMsg(''), 4000);
+    } catch (err) {
+      setSaveMsg('Error: ' + err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleRemove(providerId) {
+    setRemoving(prev => ({ ...prev, [providerId]: true }));
+    try {
+      const res = await fetch(`/auth/keys/${providerId}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      });
+      if (!res.ok) throw new Error('Failed to remove key');
+      setSavedKeys(prev => {
+        const next = { ...prev };
+        delete next[providerId];
+        return next;
+      });
+    } catch (err) {
+      setSaveMsg('Error removing key: ' + err.message);
+    } finally {
+      setRemoving(prev => ({ ...prev, [providerId]: false }));
+    }
+  }
 
   function handleLogout() {
     logout();
     navigate('/');
   }
 
-  function toggleShowKey(provider) {
-    setShowKeys(prev => ({
-      ...prev,
-      [provider]: !prev[provider]
-    }));
-  }
-
-  async function handleSaveKeys() {
-    setSavingKeys(true);
-    setKeySaveMessage('');
-    try {
-      const res = await fetch('/api/settings/api-keys', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(apiKeys),
-      });
-      if (!res.ok) throw new Error('Failed to save API keys');
-      setKeySaveMessage('API keys saved successfully');
-      setTimeout(() => setKeySaveMessage(''), 3000);
-    } catch (err) {
-      setKeySaveMessage('Error: ' + err.message);
-    } finally {
-      setSavingKeys(false);
-    }
-  }
-
-  const planBadgeStyle = user?.plan === 'PRO'
-    ? { ...styles.planBadge, background: 'rgba(168,151,255,0.2)', color: 'var(--violet-bright)', borderColor: 'rgba(168,151,255,0.4)' }
-    : { ...styles.planBadge, background: 'rgba(160,160,176,0.2)', color: 'var(--text-2)', borderColor: 'rgba(160,160,176,0.4)' };
+  const hasAnyKey = Object.keys(savedKeys).length > 0;
 
   return (
     <div style={styles.root}>
       <Navbar />
       <div style={styles.container}>
-        <h1 style={styles.heading}>Settings</h1>
 
-        <div style={styles.twoColumn}>
-          {/* Left Column - Profile */}
-          <div>
-            <div style={styles.card}>
-              <h2 style={styles.cardTitle}>Profile</h2>
+        <div style={styles.pageHeader}>
+          <h1 style={styles.heading}>Settings</h1>
+          <p style={styles.subheading}>WebSight is free to use — bring your own API keys to get started.</p>
+        </div>
 
-              {/* Avatar */}
-              <div style={styles.profileSection}>
-                {user?.avatarUrl ? (
-                  <img src={user.avatarUrl} alt={user.name} style={styles.avatar} />
-                ) : (
-                  <div style={styles.avatarPlaceholder}>
-                    {user?.name?.charAt(0).toUpperCase()}
-                  </div>
-                )}
+        {/* Setup status banner */}
+        {!hasAnyKey && (
+          <div style={styles.setupBanner}>
+            <span style={styles.setupIcon}>🔑</span>
+            <div>
+              <div style={styles.setupBannerTitle}>Add at least one API key to start generating</div>
+              <div style={styles.setupBannerSub}>Your keys are encrypted with AES-256-GCM and never shared.</div>
+            </div>
+          </div>
+        )}
 
-                <div style={styles.profileInfo}>
-                  <div style={styles.profileName}>{user?.name || 'User'}</div>
-                  <div style={styles.profileEmail}>{user?.email}</div>
+        <div style={styles.layout}>
+          {/* Left: Profile */}
+          <div style={styles.card}>
+            <h2 style={styles.cardTitle}>Profile</h2>
+            <div style={styles.profileRow}>
+              {user?.avatarUrl
+                ? <img src={user.avatarUrl} alt={user.name} style={styles.avatar} />
+                : <div style={styles.avatarFallback}>{user?.name?.charAt(0).toUpperCase()}</div>
+              }
+              <div>
+                <div style={styles.profileName}>{user?.name || 'User'}</div>
+                <div style={styles.profileEmail}>{user?.email}</div>
+              </div>
+            </div>
+
+            <div style={styles.divider} />
+
+            <div style={styles.keyStatus}>
+              {PROVIDERS.map(p => (
+                <div key={p.id} style={styles.keyStatusRow}>
+                  <span style={styles.keyStatusDot(!!savedKeys[p.id])} />
+                  <span style={styles.keyStatusLabel}>{p.label}</span>
+                  <span style={styles.keyStatusValue}>
+                    {savedKeys[p.id] ? savedKeys[p.id].hint : 'not set'}
+                  </span>
                 </div>
-              </div>
+              ))}
+            </div>
 
-              <div style={styles.divider} />
+            <div style={styles.divider} />
 
-              {/* Plan Badge */}
-              <div style={styles.planSection}>
-                <span style={planBadgeStyle}>
-                  {user?.plan === 'PRO' ? '✦ PRO' : '◆ FREE'}
-                </span>
-              </div>
-
-              {/* Buttons */}
-              <div style={styles.buttonGroup}>
-                <a href="/pricing" style={styles.primaryButton}>
-                  Manage Plan
-                </a>
-                <button style={styles.secondaryButton} onClick={handleLogout}>
-                  Sign Out
-                </button>
-              </div>
+            <div style={styles.buttonStack}>
+              <Link to="/" style={styles.primaryBtn}>← Back to Generator</Link>
+              <button style={styles.secondaryBtn} onClick={handleLogout}>Sign Out</button>
             </div>
           </div>
 
-          {/* Right Column - API Keys */}
-          <div>
-            <div style={styles.card}>
-              <h2 style={styles.cardTitle}>API Keys</h2>
-              <p style={styles.cardDescription}>
-                Use your own API keys to bypass platform limits
-              </p>
+          {/* Right: API Keys */}
+          <div style={styles.card}>
+            <h2 style={styles.cardTitle}>API Keys</h2>
+            <p style={styles.cardDesc}>
+              Your keys are stored encrypted in our database and used only for your own generations.
+              Keys are never logged or shared.
+            </p>
 
-              {/* API Key Inputs */}
-              <div style={styles.apiKeysSection}>
-                {[
-                  { key: 'anthropic', label: 'Anthropic API Key', provider: 'Anthropic' },
-                  { key: 'google', label: 'Google AI API Key', provider: 'Google AI' },
-                  { key: 'openai', label: 'OpenAI API Key', provider: 'OpenAI' },
-                  { key: 'groq', label: 'Groq API Key', provider: 'Groq' },
-                ].map(({ key, label, provider }) => (
-                  <div key={key} style={styles.keyInputGroup}>
-                    <label style={styles.inputLabel}>{label}</label>
-                    <div style={styles.inputWrapper}>
+            <div style={styles.providerList}>
+              {PROVIDERS.map(p => {
+                const isSaved = !!savedKeys[p.id];
+                const draft   = drafts[p.id];
+                return (
+                  <div key={p.id} style={styles.providerBlock}>
+                    <div style={styles.providerHeader}>
+                      <div style={styles.providerMeta}>
+                        <span style={styles.providerDot(p.color)} />
+                        <div>
+                          <div style={styles.providerName}>{p.label}</div>
+                          <div style={styles.providerModels}>{p.models}</div>
+                        </div>
+                      </div>
+                      {isSaved && (
+                        <div style={styles.savedBadge}>
+                          <span style={styles.savedDot} />
+                          {savedKeys[p.id].hint}
+                        </div>
+                      )}
+                    </div>
+
+                    <div style={styles.inputRow}>
                       <input
-                        type={showKeys[key] ? 'text' : 'password'}
-                        placeholder={`Enter your ${provider} API key...`}
-                        value={apiKeys[key]}
-                        onChange={(e) => setApiKeys(prev => ({
-                          ...prev,
-                          [key]: e.target.value
-                        }))}
+                        type={showKey[p.id] ? 'text' : 'password'}
+                        placeholder={isSaved ? `Update key (current: ${savedKeys[p.id].hint})` : p.placeholder}
+                        value={draft}
+                        onChange={e => setDrafts(prev => ({ ...prev, [p.id]: e.target.value }))}
                         style={styles.input}
+                        autoComplete="off"
+                        spellCheck={false}
                       />
                       <button
-                        onClick={() => toggleShowKey(key)}
-                        style={styles.showButton}
-                        title={showKeys[key] ? 'Hide' : 'Show'}
+                        onClick={() => setShowKey(prev => ({ ...prev, [p.id]: !prev[p.id] }))}
+                        style={styles.eyeBtn}
+                        title={showKey[p.id] ? 'Hide' : 'Show'}
                       >
-                        {showKeys[key] ? '👁' : '👁‍🗨'}
+                        {showKey[p.id] ? '🙈' : '👁'}
                       </button>
                     </div>
-                  </div>
-                ))}
-              </div>
 
-              {/* Save Button and Message */}
-              <div style={styles.saveSection}>
-                <button
-                  onClick={handleSaveKeys}
-                  disabled={savingKeys}
-                  style={{
-                    ...styles.saveButton,
-                    opacity: savingKeys ? 0.6 : 1,
-                    cursor: savingKeys ? 'not-allowed' : 'pointer',
-                  }}
-                >
-                  {savingKeys ? 'Saving...' : 'Save Keys'}
-                </button>
-                {keySaveMessage && (
-                  <div style={{
-                    ...styles.message,
-                    color: keySaveMessage.includes('successfully') ? 'var(--green)' : 'var(--red)'
-                  }}>
-                    {keySaveMessage}
+                    <div style={styles.providerFooter}>
+                      <a href={p.hintUrl} target="_blank" rel="noopener noreferrer" style={styles.keyLink}>
+                        {p.hint} ↗
+                      </a>
+                      {isSaved && (
+                        <button
+                          onClick={() => handleRemove(p.id)}
+                          disabled={removing[p.id]}
+                          style={styles.removeBtn}
+                        >
+                          {removing[p.id] ? 'Removing…' : 'Remove key'}
+                        </button>
+                      )}
+                    </div>
                   </div>
-                )}
-              </div>
+                );
+              })}
+            </div>
 
-              <p style={styles.warning}>
-                ⚠ Keys are stored encrypted and never shared
-              </p>
-              <p style={styles.warningSecondary}>
-                ⚠ These override the platform default
-              </p>
+            <div style={styles.saveRow}>
+              <button
+                onClick={handleSave}
+                disabled={saving || (!drafts.anthropic.trim() && !drafts.gemini.trim())}
+                style={{
+                  ...styles.saveBtn,
+                  opacity: saving || (!drafts.anthropic.trim() && !drafts.gemini.trim()) ? 0.5 : 1,
+                  cursor:  saving || (!drafts.anthropic.trim() && !drafts.gemini.trim()) ? 'not-allowed' : 'pointer',
+                }}
+              >
+                {saving ? 'Saving…' : 'Save Keys'}
+              </button>
+              {saveMsg && (
+                <span style={{
+                  ...styles.saveMsg,
+                  color: saveMsg.startsWith('Error') ? 'var(--red)' : 'var(--green)',
+                }}>
+                  {saveMsg}
+                </span>
+              )}
+            </div>
+
+            <div style={styles.encryptionNote}>
+              🔒 Keys are encrypted with AES-256-GCM before storage — we cannot read them.
             </div>
           </div>
         </div>
 
         {/* Danger Zone */}
         <div style={styles.dangerCard}>
-          <div style={styles.dangerCardHeader}>
-            <h2 style={styles.dangerCardTitle}>Danger Zone</h2>
-          </div>
-          <p style={styles.dangerCardDescription}>
-            Permanently delete your account and all associated data
-          </p>
-          <button
-            onClick={() => setShowDeleteModal(true)}
-            style={styles.dangerButton}
-          >
+          <h2 style={styles.dangerTitle}>Danger Zone</h2>
+          <p style={styles.dangerDesc}>Permanently delete your account and all associated data.</p>
+          <button onClick={() => setShowDeleteModal(true)} style={styles.dangerBtn}>
             Delete Account
           </button>
         </div>
       </div>
 
-      {/* Delete Confirmation Modal */}
       {showDeleteModal && (
-        <div style={styles.modalOverlay}>
+        <div style={styles.overlay}>
           <div style={styles.modal}>
             <h3 style={styles.modalTitle}>Delete Account</h3>
-            <p style={styles.modalText}>
-              Contact support to delete your account
-            </p>
-            <div style={styles.modalButtons}>
-              <button
-                onClick={() => setShowDeleteModal(false)}
-                style={styles.modalCancelButton}
-              >
-                Cancel
-              </button>
-              <a href="mailto:support@websight.com" style={styles.modalContactButton}>
-                Contact Support
-              </a>
+            <p style={styles.modalDesc}>Contact support to permanently delete your account and all data.</p>
+            <div style={styles.modalBtns}>
+              <button onClick={() => setShowDeleteModal(false)} style={styles.modalCancel}>Cancel</button>
+              <a href="mailto:support@websight.app" style={styles.modalContact}>Contact Support</a>
             </div>
           </div>
         </div>
@@ -225,28 +301,53 @@ export default function Settings() {
 }
 
 const styles = {
-  root: {
-    minHeight: '100vh',
-    background: 'var(--bg)',
-  },
-  container: {
-    maxWidth: 1200,
-    margin: '0 auto',
-    padding: '40px 24px',
-  },
+  root: { minHeight: '100vh', background: 'var(--bg)' },
+  container: { maxWidth: 1100, margin: '0 auto', padding: '40px 24px' },
+
+  pageHeader: { marginBottom: 32 },
   heading: {
     fontFamily: 'var(--font-display)',
-    fontSize: 'clamp(28px, 4vw, 42px)',
+    fontSize: 'clamp(26px, 4vw, 40px)',
     fontWeight: 800,
     letterSpacing: '-0.02em',
     color: 'var(--text)',
-    marginBottom: 32,
+    marginBottom: 8,
   },
-  twoColumn: {
+  subheading: {
+    fontSize: 15,
+    color: 'var(--text-2)',
+    fontFamily: 'var(--font-display)',
+  },
+
+  setupBanner: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: 14,
+    background: 'rgba(245,166,35,0.08)',
+    border: '1px solid rgba(245,166,35,0.3)',
+    borderRadius: 'var(--radius)',
+    padding: '16px 20px',
+    marginBottom: 28,
+  },
+  setupIcon: { fontSize: 22, flexShrink: 0, lineHeight: 1.4 },
+  setupBannerTitle: {
+    fontSize: 14,
+    fontWeight: 700,
+    color: '#f5a623',
+    fontFamily: 'var(--font-display)',
+    marginBottom: 4,
+  },
+  setupBannerSub: {
+    fontSize: 13,
+    color: 'var(--text-2)',
+    fontFamily: 'var(--font-display)',
+  },
+
+  layout: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))',
     gap: 24,
-    marginBottom: 32,
+    marginBottom: 28,
   },
   card: {
     background: 'var(--bg-2)',
@@ -256,237 +357,166 @@ const styles = {
   },
   cardTitle: {
     fontFamily: 'var(--font-display)',
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: 700,
     color: 'var(--text)',
-    marginBottom: 16,
+    marginBottom: 20,
   },
-  cardDescription: {
+  cardDesc: {
     fontSize: 13,
     color: 'var(--text-2)',
-    marginBottom: 20,
     fontFamily: 'var(--font-display)',
+    lineHeight: 1.6,
+    marginBottom: 24,
   },
-  profileSection: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 16,
-    marginBottom: 20,
+
+  // Profile
+  profileRow: { display: 'flex', alignItems: 'center', gap: 14, marginBottom: 20 },
+  avatar: { width: 56, height: 56, borderRadius: '50%', objectFit: 'cover', border: '2px solid var(--border-2)', flexShrink: 0 },
+  avatarFallback: {
+    width: 56, height: 56, borderRadius: '50%',
+    background: 'var(--violet)', color: '#fff',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    fontSize: 22, fontWeight: 700, flexShrink: 0,
   },
-  avatar: {
-    width: 64,
-    height: 64,
-    borderRadius: '50%',
-    objectFit: 'cover',
-    border: '2px solid var(--border-2)',
-  },
-  avatarPlaceholder: {
-    width: 64,
-    height: 64,
-    borderRadius: '50%',
-    background: 'var(--violet)',
-    color: '#fff',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontSize: 24,
-    fontWeight: 700,
-    flexShrink: 0,
-  },
-  profileInfo: {
-    flex: 1,
-  },
-  profileName: {
-    fontSize: 16,
-    fontWeight: 700,
-    color: 'var(--text)',
-    marginBottom: 4,
-    fontFamily: 'var(--font-display)',
-  },
-  profileEmail: {
-    fontSize: 13,
-    color: 'var(--text-3)',
-    fontFamily: 'var(--font-mono)',
-  },
-  divider: {
-    height: '1px',
-    background: 'var(--border)',
-    margin: '20px 0',
-  },
-  planSection: {
-    display: 'flex',
-    gap: 8,
-    marginBottom: 20,
-  },
-  planBadge: {
-    fontSize: 12,
-    fontWeight: 600,
-    padding: '6px 12px',
-    border: '1px solid',
-    borderRadius: 6,
-    fontFamily: 'var(--font-mono)',
-  },
-  buttonGroup: {
-    display: 'flex',
-    gap: 12,
-    flexDirection: 'column',
-  },
-  primaryButton: {
-    padding: '12px 16px',
+  profileName: { fontSize: 15, fontWeight: 700, color: 'var(--text)', fontFamily: 'var(--font-display)', marginBottom: 3 },
+  profileEmail: { fontSize: 13, color: 'var(--text-3)', fontFamily: 'var(--font-mono)' },
+  divider: { height: 1, background: 'var(--border)', margin: '18px 0' },
+
+  keyStatus: { display: 'flex', flexDirection: 'column', gap: 10 },
+  keyStatusRow: { display: 'flex', alignItems: 'center', gap: 8 },
+  keyStatusDot: configured => ({
+    width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
+    background: configured ? 'var(--green)' : 'var(--text-3)',
+    boxShadow: configured ? '0 0 6px rgba(30,245,160,0.5)' : 'none',
+  }),
+  keyStatusLabel: { fontSize: 13, color: 'var(--text-2)', fontFamily: 'var(--font-display)', flex: 1 },
+  keyStatusValue: { fontSize: 12, color: 'var(--text-3)', fontFamily: 'var(--font-mono)' },
+
+  buttonStack: { display: 'flex', flexDirection: 'column', gap: 10 },
+  primaryBtn: {
+    padding: '11px 16px',
     background: 'var(--violet)',
     color: '#fff',
     textDecoration: 'none',
     borderRadius: 'var(--radius)',
-    fontSize: 14,
-    fontWeight: 600,
+    fontSize: 14, fontWeight: 600,
     textAlign: 'center',
-    transition: 'all 0.2s',
     fontFamily: 'var(--font-display)',
-    border: 'none',
-    cursor: 'pointer',
     display: 'block',
   },
-  secondaryButton: {
-    padding: '12px 16px',
+  secondaryBtn: {
+    padding: '11px 16px',
     background: 'transparent',
     color: 'var(--text-2)',
     border: '1px solid var(--border)',
     borderRadius: 'var(--radius)',
-    fontSize: 14,
-    fontWeight: 600,
+    fontSize: 14, fontWeight: 600,
     cursor: 'pointer',
-    transition: 'all 0.2s',
     fontFamily: 'var(--font-display)',
   },
-  apiKeysSection: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 16,
-    marginBottom: 20,
+
+  // Provider blocks
+  providerList: { display: 'flex', flexDirection: 'column', gap: 20 },
+  providerBlock: {
+    background: 'var(--bg-3)',
+    border: '1px solid var(--border)',
+    borderRadius: 'var(--radius)',
+    padding: '16px',
   },
-  keyInputGroup: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 6,
+  providerHeader: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
+  providerMeta: { display: 'flex', alignItems: 'center', gap: 10 },
+  providerDot: color => ({
+    width: 10, height: 10, borderRadius: '50%', flexShrink: 0,
+    background: color, boxShadow: `0 0 8px ${color}88`,
+  }),
+  providerName: { fontSize: 14, fontWeight: 700, color: 'var(--text)', fontFamily: 'var(--font-display)', lineHeight: 1.2 },
+  providerModels: { fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--font-mono)', marginTop: 2 },
+  savedBadge: {
+    display: 'flex', alignItems: 'center', gap: 6,
+    background: 'rgba(30,245,160,0.1)',
+    border: '1px solid rgba(30,245,160,0.25)',
+    borderRadius: 6,
+    padding: '4px 10px',
+    fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--green)',
   },
-  inputLabel: {
-    fontSize: 13,
-    fontWeight: 600,
-    color: 'var(--text)',
-    fontFamily: 'var(--font-display)',
-  },
-  inputWrapper: {
-    display: 'flex',
-    alignItems: 'center',
-    position: 'relative',
-  },
+  savedDot: { width: 6, height: 6, borderRadius: '50%', background: 'var(--green)', flexShrink: 0 },
+
+  inputRow: { display: 'flex', alignItems: 'center', position: 'relative' },
   input: {
     flex: 1,
     padding: '10px 40px 10px 12px',
-    background: 'var(--bg-3)',
+    background: 'var(--bg)',
     border: '1px solid var(--border)',
     borderRadius: 'var(--radius)',
     color: 'var(--text)',
     fontSize: 13,
     fontFamily: 'var(--font-mono)',
     outline: 'none',
-    transition: 'all 0.2s',
   },
-  showButton: {
-    position: 'absolute',
-    right: 10,
-    background: 'none',
-    border: 'none',
-    fontSize: 16,
-    cursor: 'pointer',
-    color: 'var(--text-3)',
-    padding: '4px 6px',
-    transition: 'all 0.2s',
+  eyeBtn: {
+    position: 'absolute', right: 10,
+    background: 'none', border: 'none',
+    fontSize: 15, cursor: 'pointer',
+    color: 'var(--text-3)', padding: '4px 6px',
   },
-  saveSection: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 12,
-    marginBottom: 16,
+
+  providerFooter: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 10 },
+  keyLink: { fontSize: 12, color: 'var(--text-3)', fontFamily: 'var(--font-mono)', textDecoration: 'none' },
+  removeBtn: {
+    fontSize: 12, color: 'var(--red)',
+    background: 'none', border: 'none',
+    cursor: 'pointer', fontFamily: 'var(--font-display)', padding: 0,
   },
-  saveButton: {
-    padding: '12px 16px',
+
+  saveRow: { display: 'flex', alignItems: 'center', gap: 14, marginTop: 20 },
+  saveBtn: {
+    padding: '11px 24px',
     background: 'var(--green)',
     color: '#000',
     border: 'none',
     borderRadius: 'var(--radius)',
-    fontSize: 14,
-    fontWeight: 600,
-    cursor: 'pointer',
+    fontSize: 14, fontWeight: 700,
+    fontFamily: 'var(--font-display)',
     transition: 'all 0.2s',
-    fontFamily: 'var(--font-display)',
   },
-  message: {
-    fontSize: 13,
-    fontFamily: 'var(--font-display)',
-  },
-  warning: {
-    fontSize: 12,
-    color: 'var(--green)',
-    background: 'rgba(30,245,160,0.08)',
-    border: '1px solid rgba(30,245,160,0.2)',
-    borderRadius: 6,
-    padding: '8px 12px',
-    marginBottom: 8,
-    fontFamily: 'var(--font-mono)',
-  },
-  warningSecondary: {
+  saveMsg: { fontSize: 13, fontFamily: 'var(--font-display)' },
+
+  encryptionNote: {
+    marginTop: 16,
     fontSize: 12,
     color: 'var(--text-3)',
-    background: 'rgba(160,160,176,0.08)',
-    border: '1px solid rgba(160,160,176,0.2)',
+    background: 'rgba(160,160,176,0.06)',
+    border: '1px solid rgba(160,160,176,0.15)',
     borderRadius: 6,
     padding: '8px 12px',
     fontFamily: 'var(--font-mono)',
   },
+
+  // Danger zone
   dangerCard: {
     background: 'var(--bg-2)',
-    border: '2px solid var(--red)',
+    border: '2px solid rgba(255,80,80,0.4)',
     borderRadius: 'var(--radius-lg)',
     padding: '28px',
   },
-  dangerCardHeader: {
-    marginBottom: 12,
-  },
-  dangerCardTitle: {
-    fontFamily: 'var(--font-display)',
-    fontSize: 18,
-    fontWeight: 700,
-    color: 'var(--red)',
-  },
-  dangerCardDescription: {
-    fontSize: 13,
-    color: 'var(--text-2)',
-    marginBottom: 16,
-    fontFamily: 'var(--font-display)',
-  },
-  dangerButton: {
-    padding: '12px 20px',
+  dangerTitle: { fontFamily: 'var(--font-display)', fontSize: 18, fontWeight: 700, color: 'var(--red)', marginBottom: 8 },
+  dangerDesc: { fontSize: 13, color: 'var(--text-2)', fontFamily: 'var(--font-display)', marginBottom: 16 },
+  dangerBtn: {
+    padding: '10px 20px',
     background: 'transparent',
     color: 'var(--red)',
     border: '1px solid var(--red)',
     borderRadius: 'var(--radius)',
-    fontSize: 14,
-    fontWeight: 600,
+    fontSize: 14, fontWeight: 600,
     cursor: 'pointer',
-    transition: 'all 0.2s',
     fontFamily: 'var(--font-display)',
   },
-  modalOverlay: {
-    position: 'fixed',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    background: 'rgba(0,0,0,0.5)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
+
+  overlay: {
+    position: 'fixed', inset: 0,
+    background: 'rgba(0,0,0,0.6)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
     zIndex: 1000,
   },
   modal: {
@@ -494,57 +524,27 @@ const styles = {
     border: '1px solid var(--border-2)',
     borderRadius: 'var(--radius-lg)',
     padding: '28px',
-    maxWidth: 400,
-    width: '100%',
-    margin: '0 20px',
+    maxWidth: 400, width: '100%', margin: '0 20px',
   },
-  modalTitle: {
-    fontFamily: 'var(--font-display)',
-    fontSize: 20,
-    fontWeight: 700,
-    color: 'var(--text)',
-    marginBottom: 12,
-  },
-  modalText: {
-    fontSize: 14,
-    color: 'var(--text-2)',
-    marginBottom: 20,
-    fontFamily: 'var(--font-display)',
-  },
-  modalButtons: {
-    display: 'flex',
-    gap: 12,
-  },
-  modalCancelButton: {
-    flex: 1,
-    padding: '10px 16px',
-    background: 'var(--bg-3)',
-    color: 'var(--text)',
+  modalTitle: { fontFamily: 'var(--font-display)', fontSize: 20, fontWeight: 700, color: 'var(--text)', marginBottom: 10 },
+  modalDesc: { fontSize: 14, color: 'var(--text-2)', fontFamily: 'var(--font-display)', marginBottom: 20 },
+  modalBtns: { display: 'flex', gap: 12 },
+  modalCancel: {
+    flex: 1, padding: '10px 16px',
+    background: 'var(--bg-3)', color: 'var(--text)',
     border: '1px solid var(--border)',
     borderRadius: 'var(--radius)',
-    fontSize: 13,
-    fontWeight: 600,
-    cursor: 'pointer',
-    transition: 'all 0.2s',
+    fontSize: 13, fontWeight: 600, cursor: 'pointer',
     fontFamily: 'var(--font-display)',
-    textDecoration: 'none',
   },
-  modalContactButton: {
-    flex: 1,
-    padding: '10px 16px',
-    background: 'var(--violet)',
-    color: '#fff',
+  modalContact: {
+    flex: 1, padding: '10px 16px',
+    background: 'var(--violet)', color: '#fff',
     border: 'none',
     borderRadius: 'var(--radius)',
-    fontSize: 13,
-    fontWeight: 600,
-    cursor: 'pointer',
-    transition: 'all 0.2s',
+    fontSize: 13, fontWeight: 600,
     fontFamily: 'var(--font-display)',
-    textDecoration: 'none',
-    textAlign: 'center',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
+    textDecoration: 'none', textAlign: 'center',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
   },
 };

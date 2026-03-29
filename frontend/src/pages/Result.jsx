@@ -20,6 +20,33 @@ export default function Result() {
   const logsEndRef = useRef(null);
   const sseRef     = useRef(null);
 
+  // ── Load full file map ─────────────────────────────────────────────────────
+  const loadFiles = useCallback(async () => {
+    try {
+      const res  = await fetch(`/api/jobs/${jobId}/files`);
+      const data = await res.json();
+      if (data.files) {
+        setFileMap(data.files);
+        setView('preview');
+      }
+    } catch (_) {}
+  }, [jobId]);
+
+  // ── Initial fetch: handle already-done jobs (e.g. navigating from Dashboard) ──
+  useEffect(() => {
+    if (!jobId) return;
+    fetch(`/api/jobs/${jobId}`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.error) return;
+        setJob(prev => ({ ...prev, ...data }));
+        if (data.logs) setLogs(data.logs);
+        // Load files but keep panel OPEN — user wants to see the token banner
+        if (data.status === 'done') loadFiles();
+      })
+      .catch(() => {});
+  }, [jobId, loadFiles]);
+
   // ── SSE subscription ──────────────────────────────────────────────────────
   useEffect(() => {
     if (!jobId) return;
@@ -41,14 +68,6 @@ export default function Result() {
 
     es.onerror = () => {
       es.close();
-      // Fallback: poll once
-      fetch(`/api/jobs/${jobId}`)
-        .then(r => r.json())
-        .then(data => {
-          setJob(data);
-          if (data.status === 'done') loadFiles();
-        })
-        .catch(() => {});
     };
 
     return () => es.close();
@@ -59,17 +78,7 @@ export default function Result() {
     logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [logs]);
 
-  // ── Load full file map ─────────────────────────────────────────────────────
-  const loadFiles = useCallback(async () => {
-    try {
-      const res  = await fetch(`/api/jobs/${jobId}/files`);
-      const data = await res.json();
-      if (data.files) {
-        setFileMap(data.files);
-        setView('preview');
-      }
-    } catch (_) {}
-  }, [jobId]);
+
 
   async function handleApplyEdit(command) {
     if (!command.trim()) return;

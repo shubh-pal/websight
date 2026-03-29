@@ -52,9 +52,7 @@ export default function Dashboard() {
     return matchesSearch && matchesStatus;
   });
 
-  const freeJobsUsed = thisMonthJobs;
-  const freeJobsTotal = 3;
-  const isFreeUser = user?.plan === 'free' || user?.plan === 'FREE';
+
 
   return (
     <div style={styles.root}>
@@ -89,26 +87,6 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Free Plan Usage Quota */}
-        {isFreeUser && (
-          <div style={styles.quotaBox}>
-            <div style={styles.quotaContent}>
-              <div style={styles.quotaText}>
-                {freeJobsUsed} of {freeJobsTotal} free jobs used this month
-              </div>
-              <div style={styles.quotaBarContainer}>
-                <div style={{
-                  ...styles.quotaBar,
-                  width: `${(freeJobsUsed / freeJobsTotal) * 100}%`,
-                  background: freeJobsUsed >= freeJobsTotal ? 'var(--red)' : 'var(--violet)',
-                }} />
-              </div>
-            </div>
-            <Link to="/pricing" style={styles.upgradeLink}>
-              Upgrade to Pro →
-            </Link>
-          </div>
-        )}
 
         {/* Search and Filters */}
         <div style={styles.filterSection}>
@@ -301,48 +279,7 @@ const styles = {
     textTransform: 'uppercase',
     letterSpacing: '0.05em',
   },
-  quotaBox: {
-    background: 'var(--bg-2)',
-    border: '1px solid var(--border-2)',
-    borderRadius: 'var(--radius-lg)',
-    padding: '16px 20px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 32,
-    gap: 16,
-  },
-  quotaContent: {
-    flex: 1,
-  },
-  quotaText: {
-    fontSize: 13,
-    color: 'var(--text-2)',
-    marginBottom: 8,
-    fontFamily: 'var(--font-mono)',
-  },
-  quotaBarContainer: {
-    width: '100%',
-    height: 6,
-    background: 'var(--bg-3)',
-    borderRadius: 3,
-    overflow: 'hidden',
-  },
-  quotaBar: {
-    height: '100%',
-    borderRadius: 3,
-    transition: 'all 0.3s',
-  },
-  upgradeLink: {
-    fontSize: 13,
-    color: 'var(--violet-bright)',
-    textDecoration: 'none',
-    whiteSpace: 'nowrap',
-    fontWeight: 600,
-    transition: 'all 0.2s',
-    cursor: 'pointer',
-    fontFamily: 'var(--font-display)',
-  },
+
   filterSection: {
     marginBottom: 28,
   },

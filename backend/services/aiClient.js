@@ -41,7 +41,12 @@ const MODEL_MAX_TOKENS = {
   'deepseek-chat':           8192,
 };
 
-function createAIClient(model = 'claude-opus-4-5') {
+/**
+ * @param {string} model
+ * @param {{ anthropic?: string, gemini?: string }} [keyOverrides]
+ *   User-supplied API keys (BYOK). When present they take priority over env vars.
+ */
+function createAIClient(model = 'claude-opus-4-5', keyOverrides = {}) {
   const provider = getProvider(model);
   const modelMax = MODEL_MAX_TOKENS[model] || 8192;
 
@@ -52,20 +57,24 @@ function createAIClient(model = 'claude-opus-4-5') {
 
     async complete(system, user, maxTokens, options = {}) {
       const tokens = Math.min(maxTokens || modelMax, modelMax);
-      if (provider === 'gemini')   return callGemini(model, system, user, tokens, options);
+      if (provider === 'gemini')   return callGemini(model, system, user, tokens, options, keyOverrides.gemini);
       if (provider === 'openai')   return callOpenAICompat('openai',   model, system, user, tokens, options);
       if (provider === 'groq')     return callOpenAICompat('groq',     model, system, user, tokens, options);
       if (provider === 'deepseek') return callOpenAICompat('deepseek', model, system, user, tokens, options);
-      return callClaude(model, system, user, tokens, options);
+      return callClaude(model, system, user, tokens, options, keyOverrides.anthropic);
     },
   };
 }
 
 // ── Anthropic ─────────────────────────────────────────────────────────────────
 
-async function callClaude(model, system, user, maxTokens, options = {}) {
+async function callClaude(model, system, user, maxTokens, options = {}, userApiKey = null) {
   const Anthropic = require('@anthropic-ai/sdk');
-  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  const apiKey = userApiKey || process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    throw new Error('Anthropic API key not configured. Please add your Anthropic API key in Settings.');
+  }
+  const client = new Anthropic({ apiKey });
 
   const res = await client.messages.create({
     model,
@@ -79,9 +88,13 @@ async function callClaude(model, system, user, maxTokens, options = {}) {
 
 // ── Google Gemini ─────────────────────────────────────────────────────────────
 
-async function callGemini(model, system, user, maxTokens, options = {}) {
+async function callGemini(model, system, user, maxTokens, options = {}, userApiKey = null) {
   const { GoogleGenerativeAI } = require('@google/generative-ai');
-  const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+  const apiKey = userApiKey || process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error('Google Gemini API key not configured. Please add your Google AI API key in Settings.');
+  }
+  const genAI = new GoogleGenerativeAI(apiKey);
 
   const isThinkingModel = model.startsWith('gemini-2.5');
 

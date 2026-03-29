@@ -11,43 +11,63 @@ const EXAMPLES = [
 ];
 
 const WEB_MODELS = [
-  { id: 'gemini-2.5-pro',           label: 'Gemini 2.5 Pro',   badge: '⭐ Best',     badgeColor: '#00d4e8', desc: 'Highest quality · Google' },
-  { id: 'gemini-2.5-flash',         label: 'Gemini 2.5 Flash', badge: '⚡ Fast',     badgeColor: '#1ef5a0', desc: 'Fast & capable · Google' },
-  { id: 'gemini-2.5-flash-lite',    label: 'Gemini Flash Lite', badge: '🚀 Fastest', badgeColor: '#a8f5d0', desc: 'Fastest output · Google' },
-  { id: 'claude-sonnet-4-6',        label: 'Claude Sonnet 4',  badge: '◈ Balanced', badgeColor: '#a897ff', desc: 'High quality · Anthropic' },
-  { id: 'claude-opus-4-5',          label: 'Claude Opus',      badge: '✦ Premium',  badgeColor: '#f5a623', desc: 'Best Claude · Anthropic' },
-  { id: 'gpt-4o',                   label: 'GPT-4o',           badge: '🔥 Strong',  badgeColor: '#10a37f', desc: 'Flagship · OpenAI' },
-  { id: 'gpt-4o-mini',              label: 'GPT-4o Mini',      badge: '💚 Cheap',   badgeColor: '#74c991', desc: 'Fast & cheap · OpenAI' },
-  { id: 'llama-3.3-70b-versatile',  label: 'Llama 3.3 70B',   badge: '🦙 Free',    badgeColor: '#fb923c', desc: 'Best open-source · Groq' },
-  { id: 'deepseek-chat',            label: 'DeepSeek V3',      badge: '🐋 Value',   badgeColor: '#60a5fa', desc: 'GPT-4 quality, low cost' },
+  { id: 'gemini-2.5-flash',      provider: 'gemini',    label: 'Gemini 2.5 Flash',  badge: '⚡ Fast',     badgeColor: '#1ef5a0', desc: 'Fast & capable · Google',  tier: 'free' },
+  { id: 'gemini-2.5-flash-lite', provider: 'gemini',    label: 'Gemini Flash Lite', badge: '🚀 Fastest', badgeColor: '#a8f5d0', desc: 'Fastest output · Google',  tier: 'free' },
+  { id: 'claude-sonnet-4-6',     provider: 'anthropic', label: 'Claude Sonnet 4',   badge: '◈ Balanced', badgeColor: '#a897ff', desc: 'High quality · Anthropic', tier: 'paid' },
+  { id: 'claude-opus-4-5',       provider: 'anthropic', label: 'Claude Opus',       badge: '✦ Premium',  badgeColor: '#f5a623', desc: 'Best Claude · Anthropic',  tier: 'paid' },
+  { id: 'claude-haiku-4-5',      provider: 'anthropic', label: 'Claude Haiku',      badge: '⚡ Light',   badgeColor: '#d4a0ff', desc: 'Fast & cheap · Anthropic', tier: 'paid' },
 ];
 
 
 
+// Derive provider map from WEB_MODELS so it stays in sync
+const MODEL_PROVIDER = Object.fromEntries(WEB_MODELS.map(m => [m.id, m.provider]));
+
 export default function Home() {
   const [url, setUrl]               = useState('');
   const [framework, setFramework]     = useState('react');
-  const [model, setModel]             = useState('gemini-2.5-pro');
+  const [model, setModel]             = useState('gemini-2.5-flash');
 
   const [showModelPicker, setShowModelPicker] = useState(false);
   const [loading, setLoading]       = useState(false);
   const [error, setError]           = useState('');
   const [bypassCache, setBypassCache] = useState(false);
   const [recentProjects, setRecentProjects] = useState([]);
+  const [savedKeys, setSavedKeys]   = useState(null); // null = loading, {} = loaded
   const navigate = useNavigate();
   const { user } = useAuth();
 
   useEffect(() => {
     if (!user) {
-      // User just logged out (or is not logged in) — clear projects immediately
       setRecentProjects([]);
+      setSavedKeys(null);
       return;
     }
-    fetch('/api/jobs')
-      .then(r => r.json())
-      .then(data => setRecentProjects(data))
-      .catch(() => {});
+    // Load user's recent projects and configured keys in parallel
+    Promise.all([
+      fetch('/api/jobs').then(r => r.json()).catch(() => []),
+      fetch('/auth/keys', { credentials: 'include' }).then(r => r.json()).catch(() => ({})),
+    ]).then(([jobs, keys]) => {
+      setRecentProjects(Array.isArray(jobs) ? jobs : []);
+      setSavedKeys(keys);
+    });
   }, [user]);
+
+  // Filter models to only those the user has a key for
+  const availableModels = savedKeys === null
+    ? []
+    : WEB_MODELS.filter(m => savedKeys[m.provider]);
+
+  // Auto-select first available model if current selection becomes unavailable
+  const selectedProvider = MODEL_PROVIDER[model];
+  const isModelAvailable = savedKeys && savedKeys[selectedProvider];
+
+  // If current model has no key but there are available models, switch to first
+  if (savedKeys !== null && !isModelAvailable && availableModels.length > 0 && availableModels[0].id !== model) {
+    setModel(availableModels[0].id);
+  }
+
+  const needsKey = user && savedKeys !== null && availableModels.length === 0;
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -58,6 +78,7 @@ export default function Home() {
       const res = await fetch('/api/redesign', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ url: url.trim(), framework, model, bypassCache }),
       });
       const data = await res.json();
@@ -94,6 +115,17 @@ export default function Home() {
           WebSight scrapes the site, extracts its design system, then
           generates a complete, runnable project — not just mockups.
         </p>
+
+        {/* Missing-key banner */}
+        {needsKey && (
+          <div style={styles.keyBanner}>
+            <span style={styles.keyBannerIcon}>🔑</span>
+            <span style={styles.keyBannerText}>
+              {selectedProvider === 'gemini' ? 'Google AI' : 'Anthropic'} API key not configured.
+            </span>
+            <Link to="/settings" style={styles.keyBannerLink}>Add in Settings →</Link>
+          </div>
+        )}
 
         {/* Input card */}
         <form onSubmit={handleSubmit} style={styles.card}>
@@ -249,33 +281,64 @@ export default function Home() {
               <button style={styles.modalClose} onClick={() => setShowModelPicker(false)}>✕</button>
             </div>
 
-            {/* Web Generation Model */}
             <div style={styles.modalSection}>
               <label style={styles.modalLabel}>Web Generation Model</label>
-              <p style={styles.modalHint}>The AI model used to generate your website code</p>
-              <select
-                value={model}
-                onChange={e => setModel(e.target.value)}
-                style={styles.modalSelect}
-              >
-                {WEB_MODELS.map(m => (
-                  <option key={m.id} value={m.id}>{m.label} — {m.desc}</option>
-                ))}
-              </select>
-              {WEB_MODELS.find(m => m.id === model) && (
-                <div style={styles.modelPreview}>
-                  <span style={{ ...styles.modelPreviewBadge, color: WEB_MODELS.find(m => m.id === model).badgeColor, borderColor: WEB_MODELS.find(m => m.id === model).badgeColor + '44', background: WEB_MODELS.find(m => m.id === model).badgeColor + '15' }}>
-                    {WEB_MODELS.find(m => m.id === model).badge}
-                  </span>
-                  <span style={styles.modelPreviewDesc}>{WEB_MODELS.find(m => m.id === model).desc}</span>
+              <p style={styles.modalHint}>Only models with a configured API key are shown.</p>
+
+              {availableModels.length === 0 ? (
+                <div style={styles.noModels}>
+                  <span style={styles.noModelsIcon}>🔑</span>
+                  <span style={styles.noModelsText}>No API keys configured yet.</span>
                 </div>
+              ) : (
+                <>
+                  <select
+                    value={model}
+                    onChange={e => setModel(e.target.value)}
+                    style={styles.modalSelect}
+                  >
+                    {availableModels.map(m => (
+                      <option key={m.id} value={m.id}>
+                        ({m.tier === 'free' ? 'Free' : 'Paid'}) {m.label} — {m.desc}
+                      </option>
+                    ))}
+                  </select>
+
+                  {availableModels.find(m => m.id === model) && (() => {
+                    const sel = availableModels.find(m => m.id === model);
+                    return (
+                      <div style={styles.modelPreview}>
+                        <span style={{ ...styles.modelPreviewBadge, color: sel.badgeColor, borderColor: sel.badgeColor + '44', background: sel.badgeColor + '15' }}>
+                          {sel.badge}
+                        </span>
+                        <span style={styles.modelPreviewDesc}>{sel.desc}</span>
+                        <span style={{
+                          ...styles.tierBadge,
+                          background: sel.tier === 'free' ? 'rgba(30,245,160,0.1)' : 'rgba(245,166,35,0.1)',
+                          color: sel.tier === 'free' ? 'var(--green)' : '#f5a623',
+                          borderColor: sel.tier === 'free' ? 'rgba(30,245,160,0.3)' : 'rgba(245,166,35,0.3)',
+                        }}>
+                          {sel.tier === 'free' ? 'Free tier' : 'Paid'}
+                        </span>
+                      </div>
+                    );
+                  })()}
+                </>
               )}
             </div>
 
-
-            <button style={styles.modalSave} onClick={() => setShowModelPicker(false)}>
-              Save & Close
-            </button>
+            <div style={styles.modalFooter}>
+              <Link
+                to="/settings"
+                style={styles.settingsLink}
+                onClick={() => setShowModelPicker(false)}
+              >
+                🔑 Manage API Keys in Settings →
+              </Link>
+              <button style={styles.modalSave} onClick={() => setShowModelPicker(false)}>
+                Save & Close
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -309,6 +372,29 @@ const styles = {
     background: 'var(--bg)',
     position: 'relative',
     overflow: 'hidden',
+  },
+
+  // Missing-key banner
+  keyBanner: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10,
+    background: 'rgba(245,166,35,0.08)',
+    border: '1px solid rgba(245,166,35,0.3)',
+    borderRadius: 'var(--radius)',
+    padding: '10px 16px',
+    marginBottom: 16,
+    fontSize: 13,
+    fontFamily: 'var(--font-display)',
+  },
+  keyBannerIcon: { fontSize: 16, flexShrink: 0 },
+  keyBannerText: { color: '#f5c842', flex: 1 },
+  keyBannerLink: {
+    color: '#f5a623',
+    fontWeight: 700,
+    textDecoration: 'none',
+    whiteSpace: 'nowrap',
+    flexShrink: 0,
   },
   grid: {
     position: 'fixed',
@@ -578,6 +664,45 @@ const styles = {
     fontSize: 11,
     color: 'var(--text-2)',
     lineHeight: 1.4,
+    flex: 1,
+  },
+  tierBadge: {
+    fontSize: 10,
+    fontWeight: 600,
+    padding: '2px 7px',
+    borderRadius: 4,
+    border: '1px solid',
+    fontFamily: 'var(--font-mono)',
+    whiteSpace: 'nowrap',
+  },
+  noModels: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10,
+    padding: '14px 16px',
+    background: 'rgba(245,166,35,0.06)',
+    border: '1px solid rgba(245,166,35,0.2)',
+    borderRadius: 8,
+  },
+  noModelsIcon: { fontSize: 18 },
+  noModelsText: { fontSize: 13, color: 'var(--text-2)', fontFamily: 'var(--font-display)' },
+  modalFooter: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 10,
+    marginTop: 4,
+  },
+  settingsLink: {
+    display: 'block',
+    textAlign: 'center',
+    fontSize: 13,
+    color: 'var(--text-2)',
+    textDecoration: 'none',
+    padding: '9px 12px',
+    border: '1px solid var(--border)',
+    borderRadius: 8,
+    fontFamily: 'var(--font-display)',
+    transition: 'all 0.15s',
   },
   modalSave: {
     width: '100%',

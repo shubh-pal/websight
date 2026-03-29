@@ -2,6 +2,8 @@ const express = require('express');
 const passport = require('passport');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
 const db = require('../db');
+const requireAuth = require('../middleware/requireAuth');
+const { encrypt, decrypt, getHint } = require('../services/keyEncryption');
 
 const router = express.Router();
 
@@ -121,6 +123,83 @@ router.post('/logout', (req, res) => {
     }
     res.json({ message: 'Logged out' });
   });
+});
+
+// ── API Key Management ────────────────────────────────────────────────────────
+
+// GET /auth/keys — Return masked hints for configured providers
+router.get('/keys', requireAuth, async (req, res) => {
+  if (!db.pool) return res.json({});
+  try {
+    const result = await db.query(
+      'SELECT provider, key_hint FROM api_keys WHERE user_id = $1',
+      [req.user.id]
+    );
+    const keys = {};
+    for (const row of result.rows) {
+      keys[row.provider] = { configured: true, hint: row.key_hint };
+    }
+    return res.json(keys);
+  } catch (err) {
+    console.error('[auth] Error fetching keys:', err.message);
+    res.status(500).json({ error: 'Failed to fetch keys' });
+  }
+});
+
+// PUT /auth/keys — Save (upsert) encrypted API keys
+// Body: { anthropic?: string, gemini?: string }
+// Only providers included in the body are updated; omit a key to leave it unchanged.
+router.put('/keys', requireAuth, async (req, res) => {
+  if (!db.pool) return res.status(503).json({ error: 'Database not configured' });
+  const { anthropic, gemini } = req.body;
+  const userId = req.user.id;
+
+  const updates = [];
+  if (anthropic && anthropic.trim()) updates.push({ provider: 'anthropic', key: anthropic.trim() });
+  if (gemini   && gemini.trim())    updates.push({ provider: 'gemini',     key: gemini.trim()   });
+
+  if (updates.length === 0) {
+    return res.status(400).json({ error: 'No keys provided' });
+  }
+
+  try {
+    for (const { provider, key } of updates) {
+      const encryptedKey = encrypt(key);
+      const hint = getHint(key);
+      await db.query(
+        `INSERT INTO api_keys (user_id, provider, encrypted_key, key_hint, updated_at)
+         VALUES ($1, $2, $3, $4, NOW())
+         ON CONFLICT (user_id, provider) DO UPDATE SET
+           encrypted_key = EXCLUDED.encrypted_key,
+           key_hint      = EXCLUDED.key_hint,
+           updated_at    = NOW()`,
+        [userId, provider, encryptedKey, hint]
+      );
+    }
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[auth] Error saving keys:', err.message);
+    res.status(500).json({ error: 'Failed to save keys' });
+  }
+});
+
+// DELETE /auth/keys/:provider — Remove a single provider's key
+router.delete('/keys/:provider', requireAuth, async (req, res) => {
+  if (!db.pool) return res.status(503).json({ error: 'Database not configured' });
+  const { provider } = req.params;
+  if (!['anthropic', 'gemini'].includes(provider)) {
+    return res.status(400).json({ error: 'Invalid provider' });
+  }
+  try {
+    await db.query(
+      'DELETE FROM api_keys WHERE user_id = $1 AND provider = $2',
+      [req.user.id, provider]
+    );
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[auth] Error deleting key:', err.message);
+    res.status(500).json({ error: 'Failed to delete key' });
+  }
 });
 
 module.exports = router;
