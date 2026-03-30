@@ -1,0 +1,25 @@
+services:
+  websight-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: websight-app
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    env_file:
+      - ./backend/.env
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+    volumes:
+      - ./backend/data:/app/backend/data
+      - ./backend/templates:/app/backend/templates
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

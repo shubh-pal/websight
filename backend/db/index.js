@@ -13,6 +13,13 @@ if (process.env.DATABASE_URL) {
   });
 
   console.log('[db] PostgreSQL pool initialized');
+  
+  // Test connection on startup to catch DNS/NW issues early
+  pool.query('SELECT 1').then(() => {
+    console.log('[db] Successfully connected to PostgreSQL');
+  }).catch(err => {
+    console.error('[db] CRITICAL: Database connection failed:', err.message);
+  });
 } else {
   console.warn('[db] DATABASE_URL not set – database features disabled (in-memory only)');
 }

@@ -146,6 +146,20 @@ app.delete('/api/jobs/:id', requireAuth, async (req, res) => {
   }
 });
 
+// Static file serving for Frontend (Production)
+if (process.env.NODE_ENV === 'production' || fs.existsSync(path.join(__dirname, '../frontend/dist'))) {
+  const frontendDist = path.join(__dirname, '../frontend/dist');
+  app.use(express.static(frontendDist));
+  
+  // Catch-all route for SPA — only for GET requests not hitting /api or /auth
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api') || req.path.startsWith('/auth')) return next();
+    const indexPath = path.join(frontendDist, 'index.html');
+    if (fs.existsSync(indexPath)) return res.sendFile(indexPath);
+    next();
+  });
+}
+
 app.listen(PORT, () => {
   const dbStatus = db.pool ? '[db: connected]' : '[db: offline]';
   console.log(`\x1b[36m✦ WebSight backend\x1b[0m  ${dbStatus}  http://localhost:${PORT}`);
