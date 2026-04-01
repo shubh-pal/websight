@@ -62,10 +62,7 @@ function httpPost(url, body, headers = {}) {
 
 // ─── Fetch component reference from 21st.dev ─────────────────────────────────
 async function fetchComponentReference(componentType) {
-  if (!API_KEY) {
-    console.warn('[ComponentFetcher] No TWENTYFIRST_API_KEY — skipping reference fetch');
-    return null;
-  }
+  if (!API_KEY) return null;
 
   // Check cache
   const cached = _cache.get(componentType);
@@ -82,26 +79,32 @@ async function fetchComponentReference(componentType) {
       { 'x-api-key': API_KEY }
     );
 
-    if (status !== 200 || !body?.results?.length) {
-      console.warn(`[ComponentFetcher] No results for ${componentType} (status ${status})`);
+    if (status !== 200) {
+      console.warn(`[ComponentFetcher] HTTP ${status} for ${componentType}:`, JSON.stringify(body).slice(0, 200));
+      return null;
+    }
+
+    // Handle both { results: [...] } and flat array responses
+    const rawResults = body?.results ?? body?.data ?? (Array.isArray(body) ? body : null);
+    if (!rawResults?.length) {
+      console.warn(`[ComponentFetcher] No results for ${componentType}. Response keys:`, Object.keys(body || {}));
       return null;
     }
 
     // Extract the best reference(s)
-    const results = body.results.slice(0, 2);
+    const results = rawResults.slice(0, 2);
     const snippets = results.map((r, i) => {
-      // 21st.dev returns componentCode (full component) and demoCode (usage example)
-      const code = r.componentCode || r.demoCode || r.code || r.component_code || '';
-      const name = r.componentName || r.demoName || r.name || `Reference ${i + 1}`;
+      const code = r.componentCode || r.demoCode || r.code || r.component_code || r.content || '';
+      const name = r.componentName || r.demoName || r.name || r.title || `Reference ${i + 1}`;
       if (!code || code.length < 50) return null;
-      return `// 21st.dev Reference ${i + 1}: "${name}"\n${code.slice(0, 2000)}`;
+      return `// Reference ${i + 1}: "${name}"\n${code.slice(0, 2000)}`;
     }).filter(Boolean);
 
     if (!snippets.length) return null;
 
     const reference = snippets.join('\n\n// ---\n\n');
     _cache.set(componentType, { reference, fetchedAt: Date.now() });
-    console.log(`[ComponentFetcher] ✓ Fetched ${componentType} reference (${reference.length} chars)`);
+    console.log(`[ComponentFetcher] ✓ ${componentType} reference loaded (${reference.length} chars)`);
     return reference;
 
   } catch (err) {
@@ -136,7 +139,7 @@ function buildReferenceBlock(componentType, referenceCode) {
   if (!referenceCode) return '';
   return `
 ┌─────────────────────────────────────────────────────────────────┐
-│  REAL PRODUCTION REFERENCE (21st.dev community component)       │
+│  REAL PRODUCTION REFERENCE (community component)                │
 │  Study the structure, patterns, and quality — then SURPASS it   │
 │  with the brand tokens and creative direction above.            │
 └─────────────────────────────────────────────────────────────────┘

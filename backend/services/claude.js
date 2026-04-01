@@ -17,12 +17,9 @@ async function generateRedesign(siteData, framework = 'react', onProgress = () =
   const diBlock      = buildDesignIntelligenceBlock(designSystem);
   onProgress(1, `Design system matched → ${designSystem.category} · ${designSystem.fonts?.heading || 'auto font'}`);
 
-  // ── Fetch 21st.dev component references in parallel (non-blocking) ────────
+  // ── Fetch component references in parallel (non-blocking) ────────────────
   const componentTypes = ['Hero', 'Features', 'Stats', 'Testimonials', 'CTA', 'Header', 'Footer'];
-  onProgress(1, 'Fetching production component references from 21st.dev…');
   const componentRefs = await fetchAllComponentReferences(componentTypes);
-  const refCount = Object.keys(componentRefs).length;
-  onProgress(1, `✓ ${refCount}/${componentTypes.length} component references loaded`);
 
   onProgress(1, `Analyzing brand identity… [${model}]`);
   const tokens = await analyzeAndTokenize(siteData, ai, (msg) => onProgress(1, msg), designSystem);
@@ -894,7 +891,7 @@ ${diBlock ? `\nINDUSTRY DESIGN RULES:\n${diBlock}` : ''}`;
     const refBlock   = refCode ? buildReferenceBlock(compType, refCode) : '';
     const fullPrompt = refBlock ? `${comp.prompt}\n\n${refBlock}` : comp.prompt;
 
-    onLog(`Generating ${comp.name}${refCode ? ' + 21st.dev ref' : ''}…`);
+    onLog(`Generating ${comp.name}…`);
     try {
       files[filePath] = await generateSingleFile(fullPrompt, framework, ai, onLog, cssCtx);
     } catch (err) {

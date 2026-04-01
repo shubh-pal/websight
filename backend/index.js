@@ -24,6 +24,15 @@ const app = express();
 app.set("trust proxy", 1); // Trust Cloudflare + Nginx proxy
 const PORT = process.env.PORT || 3001;
 
+// ── Cross-Origin Isolation headers (required for StackBlitz WebContainers) ───
+// Only applied to HTML page responses, not API/static asset routes
+app.use((req, res, next) => {
+  if (req.path.startsWith('/api') || req.path.startsWith('/auth')) return next();
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+  res.setHeader('Cross-Origin-Embedder-Policy', 'credentialless');
+  next();
+});
+
 // ── Subdomain serving (must run before session/auth middleware) ──────────────
 // Serves published projects on [slug].localhost:PORT or [slug].APP_DOMAIN
 app.use((req, res, next) => {
