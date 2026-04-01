@@ -24,12 +24,13 @@ const app = express();
 app.set("trust proxy", 1); // Trust Cloudflare + Nginx proxy
 const PORT = process.env.PORT || 3001;
 
-// ── Cross-Origin Isolation headers (required for StackBlitz WebContainers) ───
-// Only applied to HTML page responses, not API/static asset routes
+// ── Cross-Origin Opener Policy (safe for all pages) ─────────────────────────
 app.use((req, res, next) => {
+  // Skip API and auth routes
   if (req.path.startsWith('/api') || req.path.startsWith('/auth')) return next();
+  // Skip static assets (js, css, images, fonts)
+  if (/\.(js|css|png|jpg|jpeg|svg|ico|woff2?|ttf|map)$/.test(req.path)) return next();
   res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
-  res.setHeader('Cross-Origin-Embedder-Policy', 'credentialless');
   next();
 });
 
@@ -66,7 +67,33 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       ...helmet.contentSecurityPolicy.getDefaultDirectives(),
-      'img-src': ["'self'", 'data:', 'https://lh3.googleusercontent.com', 'https://*.googleusercontent.com', 'https://*.google.com'],
+      'script-src': [
+        "'self'",
+        "'unsafe-inline'",
+        'https://www.googletagmanager.com',
+        'https://static.cloudflareinsights.com',
+        'https://cdnjs.cloudflare.com',
+      ],
+      'connect-src': [
+        "'self'",
+        'https://www.google-analytics.com',
+        'https://analytics.google.com',
+        'https://cdn.jsdelivr.net',
+        'wss:',
+        'ws:',
+      ],
+      'img-src': [
+        "'self'",
+        'data:',
+        'https://lh3.googleusercontent.com',
+        'https://*.googleusercontent.com',
+        'https://*.google.com',
+      ],
+      'frame-src': [
+        "'self'",
+        'https://stackblitz.com',
+        'https://*.staticblitz.com',
+      ],
     }
   }
 }));
