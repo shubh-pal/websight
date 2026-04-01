@@ -24,15 +24,6 @@ const app = express();
 app.set("trust proxy", 1); // Trust Cloudflare + Nginx proxy
 const PORT = process.env.PORT || 3001;
 
-// ── Cross-Origin Opener Policy (safe for all pages) ─────────────────────────
-app.use((req, res, next) => {
-  // Skip API and auth routes
-  if (req.path.startsWith('/api') || req.path.startsWith('/auth')) return next();
-  // Skip static assets (js, css, images, fonts)
-  if (/\.(js|css|png|jpg|jpeg|svg|ico|woff2?|ttf|map)$/.test(req.path)) return next();
-  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
-  next();
-});
 
 // ── Subdomain serving (must run before session/auth middleware) ──────────────
 // Serves published projects on [slug].localhost:PORT or [slug].APP_DOMAIN
