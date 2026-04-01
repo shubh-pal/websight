@@ -14,12 +14,14 @@ const snapshotRouter = require('./routes/snapshot');
 const jobsRouter = require('./routes/jobs');
 const publishRouter = require('./routes/publish');
 const contactRouter = require('./routes/contact');
+const waitlistRouter = require('./routes/waitlist');
 const { findJobIdBySubdomain, getDistDir, registerSubdomain } = require('./services/publisher');
 const path = require('path');
 const fs = require('fs');
 const expressStatic = require('express').static;
 
 const app = express();
+app.set("trust proxy", 1); // Trust Cloudflare + Nginx proxy
 const PORT = process.env.PORT || 3001;
 
 // ── Subdomain serving (must run before session/auth middleware) ──────────────
@@ -51,7 +53,14 @@ app.use((req, res, next) => {
 
 
 // Security middleware
-app.use(helmet());
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      ...helmet.contentSecurityPolicy.getDefaultDirectives(),
+      'img-src': ["'self'", 'data:', 'https://lh3.googleusercontent.com', 'https://*.googleusercontent.com', 'https://*.google.com'],
+    }
+  }
+}));
 
 // Session store (postgres or memory fallback)
 const PgSession = connectPgSimple(session);
@@ -66,6 +75,7 @@ app.use(session({
   cookie: {
     secure: process.env.NODE_ENV === 'production',
     httpOnly: true,
+    sameSite: 'lax',
     maxAge: 30 * 24 * 60 * 60 * 1000 // 30 days
   }
 }));
@@ -98,6 +108,7 @@ app.use('/api/snapshot', snapshotRouter);
 app.use('/api/jobs', jobsRouter);
 app.use('/api/jobs', publishRouter);
 app.use('/api/contact', contactRouter);
+app.use('/api/waitlist', waitlistRouter);
 
 // Health check endpoint
 app.get('/api/health', (_, res) => res.json({ status: 'ok', version: '1.0.0' }));

@@ -193,7 +193,7 @@ export default function Result() {
             >
               <polyline points="18 15 12 9 6 15" />
             </svg>
-            {panelOpen ? 'Collapse' : 'Design tokens'}
+            {panelOpen ? 'Collapse' : 'Style details'}
           </button>
         )}
 
@@ -217,7 +217,7 @@ export default function Result() {
             {/* Download button */}
             <a href={`/api/jobs/${jobId}/download`} style={s.downloadBtn}>
               <DownloadIcon />
-              Download ZIP
+              Download Project
             </a>
           </>
         )}
@@ -260,7 +260,7 @@ export default function Result() {
             {[
               ['preview', 'Preview', true],
               ['logs',    'Logs'],
-              ...(isDone ? [['tokens', 'Tokens'], ['compare', 'Compare']] : []),
+              ...(isDone ? [['tokens', 'Styles'], ['compare', 'Compare']] : []),
             ].map(([v, label, highlight]) => (
               <button
                 key={v}
@@ -401,7 +401,7 @@ function TokensDetail({ tokens }) {
   return (
     <div style={{ padding: 24, overflowY: 'auto', height: '100%', boxSizing: 'border-box' }}>
       <h2 style={{ fontFamily: 'var(--font-display)', fontSize: 18, marginBottom: 20, color: 'var(--text)' }}>
-        Design Tokens
+        Style Details
       </h2>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 12, marginBottom: 24 }}>
         {entries.map(([key, val]) => (

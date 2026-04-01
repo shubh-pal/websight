@@ -1,6 +1,6 @@
 export default function ProgressSteps({ step, stepName, status }) {
   const steps = [
-    { n: 1, label: 'Scrape' },
+    { n: 1, label: 'Read' },
     { n: 2, label: 'Analyze' },
     { n: 3, label: 'Components' },
     { n: 4, label: 'Pages' },

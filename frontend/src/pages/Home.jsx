@@ -22,9 +22,9 @@ const MODEL_PROVIDER = Object.fromEntries(WEB_MODELS.map(m => [m.id, m.provider]
 
 const HOW_IT_WORKS = [
   { n: '01', title: 'Paste a URL', desc: 'Drop any website URL into the input — or use the Chrome extension to capture a tab including authenticated pages.' },
-  { n: '02', title: 'AI Scrapes & Analyzes', desc: 'Puppeteer renders the full page. Claude reads everything: layout, palette, fonts, component structure, copy.' },
-  { n: '03', title: 'Code is Generated', desc: 'A multi-step AI pipeline: design tokens first, then shared components, then full pages — all internally consistent.' },
-  { n: '04', title: 'Download & Run', desc: "Get a ZIP with a complete Vite (React) project. One install command and you're live locally." },
+  { n: '02', title: 'AI Reads & Analyzes', desc: 'WebSight visits the page and reads everything — colors, fonts, layout, sections, and content — just like a human would.' },
+  { n: '03', title: 'Code is Generated', desc: 'The AI builds your new site piece by piece: styles first, then shared elements, then full pages — all consistent with each other.' },
+  { n: '04', title: 'Download & Use', desc: 'Get a ready-to-use React project. Open it in your browser instantly or download it to customize further.' },
 ];
 
 export default function Home() {
@@ -38,6 +38,14 @@ export default function Home() {
   const [recentProjects, setRecentProjects] = useState([]);
   const [savedKeys, setSavedKeys] = useState(null);
   const [heroVisible, setHeroVisible] = useState(false);
+
+  // Waitlist modal state
+  const [waitlistModal, setWaitlistModal] = useState(null); // 'pro' | 'max' | null
+  const [waitlistName, setWaitlistName] = useState('');
+  const [waitlistEmail, setWaitlistEmail] = useState('');
+  const [waitlistLoading, setWaitlistLoading] = useState(false);
+  const [waitlistSuccess, setWaitlistSuccess] = useState(false);
+  const [waitlistError, setWaitlistError] = useState('');
 
   // Contact form state
   const [contactName, setContactName] = useState('');
@@ -115,6 +123,35 @@ export default function Home() {
     }
   }
 
+  async function handleWaitlistSubmit(e) {
+    e.preventDefault();
+    setWaitlistLoading(true); setWaitlistError('');
+    try {
+      const res = await fetch('/api/waitlist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: waitlistName, email: waitlistEmail, plan: waitlistModal }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to join');
+      setWaitlistSuccess(true);
+    } catch (err) {
+      setWaitlistError(err.message);
+    } finally {
+      setWaitlistLoading(false);
+    }
+  }
+
+  function openWaitlist(plan) {
+    setWaitlistModal(plan);
+    setWaitlistName(''); setWaitlistEmail('');
+    setWaitlistSuccess(false); setWaitlistError('');
+  }
+
+  function closeWaitlist() {
+    setWaitlistModal(null);
+  }
+
   return (
     <div style={s.root}>
       <div style={s.grid} aria-hidden />
@@ -134,14 +171,14 @@ export default function Home() {
         </h1>
 
         <p style={s.heroSub}>
-          Paste a URL. WebSight scrapes the live page, extracts its full design system,
-          then generates a <strong style={{ color: 'var(--text)' }}>complete, runnable project</strong> — not mockups. Real code you can ship.
+          Paste a URL. WebSight reads the live page, understands its look and feel,
+          then generates a <strong style={{ color: 'var(--text)' }}>complete, working project</strong> — not mockups. Real code you can use.
         </p>
 
         {needsKey && (
           <div style={s.keyBanner}>
             <span>🔑</span>
-            <span style={{ color: '#f5c842', flex: 1 }}>No API key configured.</span>
+            <span style={{ color: '#f5c842', flex: 1 }}>No AI model connected.</span>
             <Link to="/settings" style={{ color: '#f5a623', fontWeight: 700 }}>Add in Settings →</Link>
           </div>
         )}
@@ -218,6 +255,65 @@ export default function Home() {
               </div>
             ))}
           </div>
+        </div>
+      </section>
+
+      {/* ══════════ PRICING PREVIEW ══════════ */}
+      <section style={s.section} id="pricing">
+        <div style={s.sectionInner}>
+          <div style={s.sectionLabel}>Pricing</div>
+          <h2 style={s.sectionH2}>Start free. Upgrade when you're ready.</h2>
+          <p style={s.sectionSub}>Pro & Max plans coming soon — join the waitlist for early access and special pricing.</p>
+
+          <div style={s.pricingGrid}>
+            {/* Free */}
+            <div style={s.pricingCard}>
+              <div style={s.pricingPlanName}>Free</div>
+              <div style={s.pricingPrice}><span style={s.pricingAmount}>$0</span><span style={s.pricingPer}>/mo</span></div>
+              <ul style={s.pricingFeatures}>
+                <li style={s.pricingFeature}><span style={{ color: 'var(--green)' }}>✓</span> Unlimited generations</li>
+                <li style={s.pricingFeature}><span style={{ color: 'var(--green)' }}>✓</span> Connect your own AI account</li>
+                <li style={s.pricingFeature}><span style={{ color: 'var(--green)' }}>✓</span> Ready-to-use React project</li>
+                <li style={s.pricingFeature}><span style={{ color: 'var(--green)' }}>✓</span> Dashboard & history</li>
+              </ul>
+              <Link to="/login" style={{ ...s.pricingBtn, background: 'var(--bg-2)', color: 'var(--text)', border: '1px solid var(--border)' }}>
+                Get started free
+              </Link>
+            </div>
+
+            {/* Pro */}
+            <div style={{ ...s.pricingCard, ...s.pricingCardHighlight }}>
+              <div style={s.pricingBadge}>Coming soon</div>
+              <div style={{ ...s.pricingPlanName, color: '#a897ff' }}>Pro</div>
+              <div style={s.pricingPrice}><span style={s.pricingAmount}>$19</span><span style={s.pricingPer}>/mo</span></div>
+              <ul style={s.pricingFeatures}>
+                <li style={s.pricingFeature}><span style={{ color: '#a897ff' }}>✓</span> Everything in Free</li>
+                <li style={s.pricingFeature}><span style={{ color: '#a897ff' }}>✓</span> Hosted API credits included</li>
+                <li style={s.pricingFeature}><span style={{ color: '#a897ff' }}>✓</span> Priority generation queue</li>
+                <li style={s.pricingFeature}><span style={{ color: '#a897ff' }}>✓</span> Multi-page site generation</li>
+              </ul>
+              <button onClick={() => openWaitlist('pro')} style={{ ...s.pricingBtn, background: '#7c6af7', color: '#fff', border: 'none', cursor: 'pointer' }}>
+                Join waitlist →
+              </button>
+            </div>
+
+            {/* Max */}
+            <div style={s.pricingCard}>
+              <div style={s.pricingBadge}>Coming soon</div>
+              <div style={{ ...s.pricingPlanName, color: '#f5a623' }}>Max</div>
+              <div style={s.pricingPrice}><span style={s.pricingAmount}>$49</span><span style={s.pricingPer}>/mo</span></div>
+              <ul style={s.pricingFeatures}>
+                <li style={s.pricingFeature}><span style={{ color: '#f5a623' }}>✓</span> Everything in Pro</li>
+                <li style={s.pricingFeature}><span style={{ color: '#f5a623' }}>✓</span> Unlimited AI credits</li>
+                <li style={s.pricingFeature}><span style={{ color: '#f5a623' }}>✓</span> Premium model access</li>
+                <li style={s.pricingFeature}><span style={{ color: '#f5a623' }}>✓</span> Custom visual styles</li>
+              </ul>
+              <button onClick={() => openWaitlist('max')} style={{ ...s.pricingBtn, background: 'var(--bg-2)', color: 'var(--text)', border: '1px solid var(--border)', cursor: 'pointer' }}>
+                Join waitlist →
+              </button>
+            </div>
+          </div>
+
         </div>
       </section>
 
@@ -301,7 +397,7 @@ export default function Home() {
           <div style={s.sectionLabel}>Get started</div>
           <h2 style={{ ...s.sectionH2, marginBottom: 16 }}>Free to use. Bring your own key.</h2>
           <p style={{ ...s.sectionSub, marginBottom: 40 }}>
-            Grab a free Gemini API key from Google AI Studio and start redesigning any website immediately.
+            Connect a free Google AI account and start redesigning any website immediately.
             Zero cost. Zero setup. Just results.
           </p>
           <div style={s.ctaBtns}>
@@ -324,16 +420,62 @@ export default function Home() {
               <LogoMark />
               <span style={s.footerLogoText}>WebSight</span>
             </div>
-            <p style={s.footerTagline}>AI-powered website redesign. Scrape → Analyze → Generate → Run.</p>
+            <p style={s.footerTagline}>AI-powered website redesign. Read → Analyze → Generate → Ship.</p>
           </div>
           <div style={s.footerLinks}>
             <Link to="/login" style={s.footerLink}>Sign In</Link>
+            <a href="#pricing" style={s.footerLink}>Pricing</a>
             <Link to="/settings" style={s.footerLink}>Settings</Link>
             <Link to="/dashboard" style={s.footerLink}>Dashboard</Link>
             <a href="https://www.linkedin.com/in/shubhpalan/" target="_blank" rel="noopener noreferrer" style={s.footerLink}>LinkedIn</a>
           </div>
         </div>
       </footer>
+
+      {/* ══════════ WAITLIST MODAL ══════════ */}
+      {waitlistModal && (
+        <div style={s.modalOverlay} onClick={closeWaitlist}>
+          <div style={{ ...s.modal, maxWidth: 420 }} onClick={e => e.stopPropagation()}>
+            <div style={s.modalHeader}>
+              <span style={s.modalTitle}>
+                {waitlistModal === 'pro' ? '◈ Join Pro Waitlist' : '✦ Join Max Waitlist'}
+              </span>
+              <button style={s.modalClose} onClick={closeWaitlist}>✕</button>
+            </div>
+            {waitlistSuccess ? (
+              <div style={{ padding: '32px 24px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+                <div style={{ fontSize: 36 }}>🎉</div>
+                <div style={{ fontWeight: 700, fontSize: 18, color: 'var(--text)' }}>You're on the list!</div>
+                <p style={{ fontSize: 14, color: 'var(--text-2)', lineHeight: 1.6 }}>
+                  We'll email you when {waitlistModal === 'pro' ? 'Pro' : 'Max'} launches. Early members get priority access and special pricing.
+                </p>
+                <button onClick={closeWaitlist} style={{ ...s.modalSave, marginTop: 8 }}>Done</button>
+              </div>
+            ) : (
+              <form onSubmit={handleWaitlistSubmit} style={{ padding: '20px 24px 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+                <p style={{ fontSize: 14, color: 'var(--text-2)', margin: 0, lineHeight: 1.6 }}>
+                  Be first to access {waitlistModal === 'pro' ? 'Pro ($19/mo)' : 'Max ($49/mo)'} when it launches. Early members get exclusive pricing.
+                </p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <label style={s.modalLabel}>Name</label>
+                  <input style={s.modalSelect} type="text" placeholder="Your name" value={waitlistName}
+                    onChange={e => setWaitlistName(e.target.value)} required />
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <label style={s.modalLabel}>Email</label>
+                  <input style={s.modalSelect} type="email" placeholder="your@email.com" value={waitlistEmail}
+                    onChange={e => setWaitlistEmail(e.target.value)} required />
+                </div>
+                {waitlistError && <p style={s.error}>{waitlistError}</p>}
+                <button type="submit" disabled={waitlistLoading}
+                  style={{ ...s.modalSave, background: waitlistModal === 'pro' ? '#7c6af7' : '#f5a623', marginTop: 4 }}>
+                  {waitlistLoading ? 'Joining…' : 'Join waitlist →'}
+                </button>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* ══════════ MODEL MODAL ══════════ */}
       {showModelPicker && (
@@ -345,11 +487,11 @@ export default function Home() {
             </div>
             <div style={s.modalSection}>
               <label style={s.modalLabel}>Web Generation Model</label>
-              <p style={s.modalHint}>Only models with a configured API key are shown.</p>
+              <p style={s.modalHint}>Only AI models you've connected are shown.</p>
               {availableModels.length === 0 ? (
                 <div style={s.noModels}>
                   <span style={{ fontSize: 18 }}>🔑</span>
-                  <span style={{ fontSize: 13, color: 'var(--text-2)' }}>No API keys configured yet.</span>
+                  <span style={{ fontSize: 13, color: 'var(--text-2)' }}>No AI models connected yet.</span>
                 </div>
               ) : (
                 <>
@@ -374,7 +516,7 @@ export default function Home() {
               )}
             </div>
             <div style={s.modalFooter}>
-              <Link to="/settings" style={s.settingsLink} onClick={() => setShowModelPicker(false)}>🔑 Manage API Keys →</Link>
+              <Link to="/settings" style={s.settingsLink} onClick={() => setShowModelPicker(false)}>🔑 Connect AI Models →</Link>
               <button style={s.modalSave} onClick={() => setShowModelPicker(false)}>Save & Close</button>
             </div>
           </div>
@@ -518,6 +660,36 @@ const s = {
   stepContent: { flex: 1, paddingTop: 2 },
   stepTitle: { fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 20, color: 'var(--text)', marginBottom: 8 },
   stepDesc: { fontSize: 15, color: 'var(--text-2)', lineHeight: 1.65 },
+
+  // Pricing preview
+  pricingGrid: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 20, marginTop: 48 },
+  pricingCard: {
+    background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)',
+    padding: '32px 28px', display: 'flex', flexDirection: 'column', gap: 0, position: 'relative',
+  },
+  pricingCardHighlight: {
+    border: '1px solid rgba(124,106,247,0.5)',
+    background: 'rgba(124,106,247,0.06)',
+    boxShadow: '0 0 0 1px rgba(124,106,247,0.15)',
+  },
+  pricingBadge: {
+    position: 'absolute', top: 16, right: 16,
+    fontSize: 11, fontWeight: 600, color: 'var(--text-2)',
+    background: 'var(--bg)', border: '1px solid var(--border)',
+    borderRadius: 20, padding: '3px 10px',
+  },
+  pricingPlanName: { fontSize: 13, fontWeight: 700, color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 12 },
+  pricingPrice: { display: 'flex', alignItems: 'baseline', gap: 2, marginBottom: 24 },
+  pricingAmount: { fontFamily: 'var(--font-display)', fontSize: 42, fontWeight: 800, color: 'var(--text)', lineHeight: 1 },
+  pricingPer: { fontSize: 14, color: 'var(--text-2)', marginLeft: 4 },
+  pricingFeatures: { listStyle: 'none', padding: 0, margin: '0 0 28px 0', display: 'flex', flexDirection: 'column', gap: 10 },
+  pricingFeature: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: 'var(--text-2)' },
+  pricingBtn: {
+    display: 'block', textAlign: 'center', padding: '11px 0', borderRadius: 'var(--radius)',
+    fontWeight: 600, fontSize: 14, textDecoration: 'none', cursor: 'pointer',
+    marginTop: 'auto', transition: 'opacity 0.2s',
+  },
+  pricingFullLink: { fontSize: 14, color: 'var(--violet-bright)', textDecoration: 'none', fontWeight: 500 },
 
   // Contact
   contactLayout: { display: 'grid', gridTemplateColumns: '300px 1fr', gap: 48, alignItems: 'start' },

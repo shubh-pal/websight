@@ -7,9 +7,9 @@ const PROVIDERS = [
   {
     id: 'anthropic',
     label: 'Anthropic',
-    keyLabel: 'Anthropic API Key',
+    keyLabel: 'Anthropic Key',
     placeholder: 'sk-ant-api03-…',
-    hint: 'Get your key at console.anthropic.com',
+    hint: 'Get your free key at console.anthropic.com',
     hintUrl: 'https://console.anthropic.com/settings/keys',
     models: 'Claude Opus, Sonnet, Haiku',
     color: '#f5a623',
@@ -17,9 +17,9 @@ const PROVIDERS = [
   {
     id: 'gemini',
     label: 'Google AI',
-    keyLabel: 'Google AI API Key',
+    keyLabel: 'Google AI Key',
     placeholder: 'AIza…',
-    hint: 'Get your key at aistudio.google.com',
+    hint: 'Get your free key at aistudio.google.com',
     hintUrl: 'https://aistudio.google.com/app/apikey',
     models: 'Gemini 2.5 Pro, Flash, Flash Lite',
     color: '#00d4e8',
@@ -127,7 +127,7 @@ export default function Settings() {
 
         <div style={styles.pageHeader}>
           <h1 style={styles.heading}>Settings</h1>
-          <p style={styles.subheading}>WebSight is free to use — bring your own API keys to get started.</p>
+          <p style={styles.subheading}>WebSight is free to use — connect your own AI account to get started.</p>
         </div>
 
         {/* Setup status banner */}
@@ -135,8 +135,8 @@ export default function Settings() {
           <div style={styles.setupBanner}>
             <span style={styles.setupIcon}>🔑</span>
             <div>
-              <div style={styles.setupBannerTitle}>Add at least one API key to start generating</div>
-              <div style={styles.setupBannerSub}>Your keys are encrypted with AES-256-GCM and never shared.</div>
+              <div style={styles.setupBannerTitle}>Connect an AI account to start generating</div>
+              <div style={styles.setupBannerSub}>Your keys are securely encrypted and never shared.</div>
             </div>
           </div>
         )}
@@ -178,12 +178,11 @@ export default function Settings() {
             </div>
           </div>
 
-          {/* Right: API Keys */}
+          {/* Right: AI Connections */}
           <div style={styles.card}>
-            <h2 style={styles.cardTitle}>API Keys</h2>
+            <h2 style={styles.cardTitle}>AI Connections</h2>
             <p style={styles.cardDesc}>
-              Your keys are stored encrypted in our database and used only for your own generations.
-              Keys are never logged or shared.
+              Connect your AI accounts to enable website generation. Your keys are stored securely and only used for your own projects.
             </p>
 
             <div style={styles.providerList}>

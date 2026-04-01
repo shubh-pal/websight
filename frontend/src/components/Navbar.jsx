@@ -27,6 +27,7 @@ export default function Navbar() {
       <div style={styles.navLinks}>
         <Link to="/dashboard" style={styles.navLink}>Dashboard</Link>
         <Link to="/" style={styles.navLink}>New Project</Link>
+        <a href="/#pricing" style={styles.navLink}>Pricing</a>
       </div>
 
       {/* Right: User section */}
