@@ -1,9 +1,35 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, Component } from 'react';
 import { useParams, useSearchParams, Link } from 'react-router-dom';
 import ProgressSteps from '../components/ProgressSteps';
 import TokenBadges from '../components/TokenBadges';
 import StackBlitzPreview from '../components/StackBlitzPreview';
 import CompareSlider from '../components/CompareSlider';
+
+class ResultErrorBoundary extends Component {
+  constructor(props) { super(props); this.state = { hasError: false, error: null }; }
+  static getDerivedStateFromError(error) { return { hasError: true, error }; }
+  componentDidCatch(error, info) { console.error('[Result] Render error:', error, info); }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+          height: '100vh', gap: 16, background: 'var(--bg)', color: 'var(--text)' }}>
+          <div style={{ fontSize: 32 }}>⚠</div>
+          <div style={{ fontSize: 18, fontWeight: 600 }}>Something went wrong</div>
+          <div style={{ fontSize: 13, color: 'var(--text-2)', fontFamily: 'var(--font-mono)' }}>
+            {this.state.error?.message || 'Unexpected error'}
+          </div>
+          <button onClick={() => window.location.reload()}
+            style={{ marginTop: 8, padding: '10px 24px', background: 'var(--violet)', color: '#fff',
+              border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>
+            Reload page
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 export default function Result() {
   const { jobId } = useParams();
@@ -140,6 +166,7 @@ export default function Result() {
   const isRunning = job?.status === 'running' || job?.status === 'pending';
 
   return (
+    <ResultErrorBoundary>
     <div style={s.root}>
       {/* ── Top bar ── */}
       <header style={s.topBar}>
@@ -309,11 +336,11 @@ export default function Result() {
                     <span style={s.logTime}>{new Date(log.time).toLocaleTimeString()}</span>
                     <span style={{
                       ...s.logMsg,
-                      color: log.message.startsWith('Error') ? 'var(--red)'
-                        : log.message.startsWith('🎉') ? 'var(--green)'
+                      color: log.message?.startsWith('Error') ? 'var(--red)'
+                        : log.message?.startsWith('🎉') ? 'var(--green)'
                         : 'var(--text-2)',
                     }}>
-                      {log.message}
+                      {log.message ?? ''}
                     </span>
                   </div>
                 ))}
@@ -372,6 +399,7 @@ export default function Result() {
         </main>
       </div>
     </div>
+    </ResultErrorBoundary>
   );
 }
 
