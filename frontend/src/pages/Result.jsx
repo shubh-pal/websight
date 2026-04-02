@@ -44,6 +44,7 @@ export default function Result() {
   const [view, setView]           = useState('preview');
   const [panelOpen, setPanelOpen] = useState(true);
   const [publish, setPublish]     = useState({ status: null, url: null, error: null }); // null | 'building' | 'live' | 'error'
+  const [publishMenuOpen, setPublishMenuOpen] = useState(false);
 
   const logsEndRef = useRef(null);
   const sseRef     = useRef(null);
@@ -133,14 +134,19 @@ export default function Result() {
     } catch (_) {}
   }
 
-  async function handlePublish() {
+  async function handlePublish(force = false) {
     if (publish.status === 'building') return;
-    if (publish.status === 'live' && publish.url) { window.open(publish.url, '_blank'); return; }
     try {
-      setPublish({ status: 'building', url: null, error: null });
-      const res = await fetch(`/api/jobs/${jobId}/publish`, { method: 'POST' });
+      setPublish(p => ({ ...p, status: 'building', error: null }));
+      const url = `/api/jobs/${jobId}/publish${force ? '?force=true' : ''}`;
+      const res = await fetch(url, { method: 'POST' });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Publish failed');
+      // If already published + built, backend returns alreadyPublished=true immediately
+      if (data.alreadyPublished) {
+        setPublish({ status: 'live', url: data.url, error: null });
+        return;
+      }
       setPublish({ status: 'building', url: data.url, error: null });
       // Poll for completion
       const poll = setInterval(async () => {
@@ -159,6 +165,26 @@ export default function Result() {
     } catch (err) {
       setPublish({ status: 'error', url: null, error: err.message });
     }
+  }
+
+  async function handleUnpublish() {
+    setPublishMenuOpen(false);
+    try {
+      await fetch(`/api/jobs/${jobId}/publish`, { method: 'DELETE' });
+      setPublish({ status: null, url: null, error: null });
+    } catch (_) {}
+  }
+
+  async function handleCopyUrl() {
+    setPublishMenuOpen(false);
+    if (publish.url) {
+      try { await navigator.clipboard.writeText(publish.url); } catch (_) {}
+    }
+  }
+
+  async function handleRedeploy() {
+    setPublishMenuOpen(false);
+    await handlePublish(true);
   }
 
   const isDone    = job?.status === 'done';
@@ -226,21 +252,17 @@ export default function Result() {
 
         {isDone && (
           <>
-            {/* Publish button */}
-            <button
-              onClick={handlePublish}
-              disabled={publish.status === 'building'}
-              title={publish.status === 'live' ? `Open: ${publish.url}` : 'Publish to subdomain'}
-              style={{
-                ...s.publishBtn,
-                ...(publish.status === 'live' ? s.publishBtnLive : {}),
-                ...(publish.status === 'building' ? s.publishBtnBuilding : {}),
-                ...(publish.status === 'error' ? s.publishBtnError : {}),
-              }}
-            >
-              {publish.status === 'building' && <span style={s.spinnerXs} />}
-              {publish.status === 'live' ? '🌐 View Live' : publish.status === 'building' ? 'Building…' : publish.status === 'error' ? '⚠ Retry' : '🚀 Publish'}
-            </button>
+            {/* Publish split-button + dropdown */}
+            <PublishButton
+              publish={publish}
+              menuOpen={publishMenuOpen}
+              setMenuOpen={setPublishMenuOpen}
+              onPublish={() => handlePublish(false)}
+              onViewLive={() => window.open(publish.url, '_blank')}
+              onCopyUrl={handleCopyUrl}
+              onRedeploy={handleRedeploy}
+              onUnpublish={handleUnpublish}
+            />
             {/* Download button */}
             <a href={`/api/jobs/${jobId}/download`} style={s.downloadBtn}>
               <DownloadIcon />
@@ -460,6 +482,119 @@ function TokensDetail({ tokens }) {
   );
 }
 
+// ── Publish split-button + dropdown ───────────────────────────────────────
+
+function PublishButton({ publish, menuOpen, setMenuOpen, onPublish, onViewLive, onCopyUrl, onRedeploy, onUnpublish }) {
+  const ref = useRef(null);
+  const [copied, setCopied] = useState(false);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    if (!menuOpen) return;
+    function handle(e) {
+      if (ref.current && !ref.current.contains(e.target)) setMenuOpen(false);
+    }
+    document.addEventListener('mousedown', handle);
+    return () => document.removeEventListener('mousedown', handle);
+  }, [menuOpen, setMenuOpen]);
+
+  async function handleCopy() {
+    await onCopyUrl();
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  // ── Not yet published ──
+  if (!publish.status || publish.status === 'error') {
+    return (
+      <button
+        onClick={onPublish}
+        style={{ ...s.publishBtn, ...(publish.status === 'error' ? s.publishBtnError : {}) }}
+      >
+        {publish.status === 'error' ? '⚠ Retry Publish' : '🚀 Publish'}
+      </button>
+    );
+  }
+
+  // ── Building ──
+  if (publish.status === 'building') {
+    return (
+      <button disabled style={{ ...s.publishBtn, ...s.publishBtnBuilding }}>
+        <span style={s.spinnerXs} /> Building…
+      </button>
+    );
+  }
+
+  // ── Live — split button ──
+  return (
+    <div ref={ref} style={s.publishGroup}>
+      {/* Main action: open live site */}
+      <button onClick={onViewLive} style={s.publishBtnLiveMain}>
+        <span style={s.livePulse} />
+        View Live
+      </button>
+
+      {/* Chevron toggle */}
+      <button
+        onClick={() => setMenuOpen(o => !o)}
+        style={{ ...s.publishChevron, ...(menuOpen ? s.publishChevronOpen : {}) }}
+        title="Publish options"
+      >
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"
+          style={{ transform: menuOpen ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.18s ease' }}>
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </button>
+
+      {/* Dropdown menu */}
+      {menuOpen && (
+        <div style={s.publishMenu}>
+          {/* URL display */}
+          <div style={s.publishMenuUrl}>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" style={{ flexShrink: 0, opacity: 0.5 }}>
+              <circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+            </svg>
+            <span style={s.publishMenuUrlText}>{publish.url?.replace(/^https?:\/\//, '')}</span>
+          </div>
+
+          <div style={s.publishMenuDivider} />
+
+          <button style={s.publishMenuItem} onClick={onViewLive}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
+            </svg>
+            Open in new tab
+          </button>
+
+          <button style={s.publishMenuItem} onClick={handleCopy}>
+            {copied
+              ? <><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg> Copied!</>
+              : <><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy URL</>
+            }
+          </button>
+
+          <div style={s.publishMenuDivider} />
+
+          <button style={s.publishMenuItem} onClick={onRedeploy}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
+              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+            </svg>
+            Redeploy
+          </button>
+
+          <button style={{ ...s.publishMenuItem, ...s.publishMenuItemDanger }} onClick={onUnpublish}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <circle cx="12" cy="12" r="10"/><line x1="8" y1="12" x2="16" y2="12"/>
+            </svg>
+            Unpublish
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Icons ──────────────────────────────────────────────────────────────────
 
 function DownloadIcon() {
@@ -561,14 +696,10 @@ const s = {
     transition: 'all 0.2s',
     flexShrink: 0,
   },
-  publishBtnLive: {
-    background: 'rgba(30,245,160,0.15)',
-    color: '#1ef5a0',
-    border: '1px solid rgba(30,245,160,0.4)',
-  },
   publishBtnBuilding: {
     background: 'rgba(124,106,247,0.25)',
     color: 'var(--violet-bright)',
+    border: '1px solid rgba(124,106,247,0.3)',
     cursor: 'not-allowed',
     opacity: 0.8,
   },
@@ -576,6 +707,105 @@ const s = {
     background: 'rgba(255,80,80,0.15)',
     color: '#ff5050',
     border: '1px solid rgba(255,80,80,0.35)',
+  },
+  // Split button group (live state)
+  publishGroup: {
+    position: 'relative',
+    display: 'flex',
+    flexShrink: 0,
+  },
+  publishBtnLiveMain: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    fontSize: 13,
+    fontWeight: 600,
+    color: '#1ef5a0',
+    background: 'rgba(30,245,160,0.1)',
+    border: '1px solid rgba(30,245,160,0.35)',
+    borderRight: 'none',
+    borderRadius: '7px 0 0 7px',
+    padding: '7px 13px',
+    cursor: 'pointer',
+    transition: 'background 0.15s',
+    flexShrink: 0,
+  },
+  publishChevron: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 28,
+    color: '#1ef5a0',
+    background: 'rgba(30,245,160,0.1)',
+    border: '1px solid rgba(30,245,160,0.35)',
+    borderLeft: '1px solid rgba(30,245,160,0.18)',
+    borderRadius: '0 7px 7px 0',
+    cursor: 'pointer',
+    transition: 'background 0.15s',
+    flexShrink: 0,
+  },
+  publishChevronOpen: {
+    background: 'rgba(30,245,160,0.18)',
+  },
+  livePulse: {
+    width: 7,
+    height: 7,
+    borderRadius: '50%',
+    background: '#1ef5a0',
+    boxShadow: '0 0 7px #1ef5a0',
+    flexShrink: 0,
+    animation: 'pulse 2s ease-in-out infinite',
+  },
+  publishMenu: {
+    position: 'absolute',
+    top: 'calc(100% + 7px)',
+    right: 0,
+    background: 'var(--bg-2)',
+    border: '1px solid var(--border)',
+    borderRadius: 9,
+    boxShadow: '0 10px 32px rgba(0,0,0,0.4)',
+    minWidth: 188,
+    zIndex: 300,
+    overflow: 'hidden',
+    padding: '4px 0',
+  },
+  publishMenuUrl: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 7,
+    padding: '8px 13px 6px',
+    overflow: 'hidden',
+  },
+  publishMenuUrlText: {
+    fontSize: 11,
+    fontFamily: 'var(--font-mono)',
+    color: 'var(--text-3)',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  publishMenuDivider: {
+    height: 1,
+    background: 'var(--border)',
+    margin: '3px 0',
+  },
+  publishMenuItem: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 9,
+    width: '100%',
+    padding: '8px 13px',
+    fontSize: 12,
+    color: 'var(--text-2)',
+    background: 'transparent',
+    border: 'none',
+    cursor: 'pointer',
+    fontFamily: 'var(--font-mono)',
+    textAlign: 'left',
+    transition: 'background 0.12s, color 0.12s',
+  },
+  publishMenuItemDanger: {
+    color: '#ff6b6b',
   },
   spinnerXs: {
     width: 11,

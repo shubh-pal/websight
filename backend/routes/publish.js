@@ -1,19 +1,22 @@
 const express = require('express');
 const { getJob, getJobSync, updateJob } = require('../services/jobStore');
-const { slugify, getPublishedUrl, buildProject, isBuilt, registerSubdomain, screenshotProject } = require('../services/publisher');
+const { slugify, getPublishedUrl, buildProject, isBuilt, registerSubdomain, unregisterSubdomain, screenshotProject } = require('../services/publisher');
 const requireAuth = require('../middleware/requireAuth');
 
 const router = express.Router();
 
 // POST /api/jobs/:id/publish
 // Triggers a build and publishes the project to a subdomain.
+// Pass ?force=true to rebuild even if already live (redeploy).
 router.post('/:id/publish', requireAuth, async (req, res) => {
   const job = await getJob(req.params.id);
   if (!job) return res.status(404).json({ error: 'Job not found' });
   if (job.status !== 'done') return res.status(400).json({ error: 'Job must be complete before publishing' });
 
-  // Already published and built → return existing URL immediately
-  if (job.publishedSubdomain && isBuilt(req.params.id)) {
+  const force = req.query.force === 'true';
+
+  // Already published and built → return existing URL immediately (unless forced)
+  if (!force && job.publishedSubdomain && isBuilt(req.params.id)) {
     return res.json({
       subdomain: job.publishedSubdomain,
       url: getPublishedUrl(job.publishedSubdomain),
@@ -32,11 +35,10 @@ router.post('/:id/publish', requireAuth, async (req, res) => {
 
   buildProject(req.params.id)
     .then(async () => {
-      // Capture screenshot of the new version
       const redesignScreenshot = await screenshotProject(subdomain);
-      updateJob(req.params.id, { 
+      updateJob(req.params.id, {
         publishStatus: 'live',
-        redesignScreenshot: redesignScreenshot // Store base64 for now (simple)
+        redesignScreenshot,
       });
       console.log(`[publish] ${subdomain} is live → ${getPublishedUrl(subdomain)}`);
     })
@@ -44,6 +46,24 @@ router.post('/:id/publish', requireAuth, async (req, res) => {
       updateJob(req.params.id, { publishStatus: 'error', publishError: err.message });
       console.error(`[publish] ${subdomain} build error:`, err.message);
     });
+});
+
+// DELETE /api/jobs/:id/publish  (unpublish)
+router.delete('/:id/publish', requireAuth, async (req, res) => {
+  const job = await getJob(req.params.id);
+  if (!job) return res.status(404).json({ error: 'Job not found' });
+
+  if (job.publishedSubdomain) {
+    unregisterSubdomain(job.publishedSubdomain);
+  }
+
+  updateJob(req.params.id, {
+    publishStatus: null,
+    publishedSubdomain: null,
+    publishError: null,
+  });
+
+  res.json({ ok: true });
 });
 
 // GET /api/jobs/:id/publish-status

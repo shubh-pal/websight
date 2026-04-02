@@ -44,6 +44,10 @@ function registerSubdomain(subdomain, jobId) {
   subdomainIndex.set(subdomain, jobId);
 }
 
+function unregisterSubdomain(subdomain) {
+  subdomainIndex.delete(subdomain);
+}
+
 function findJobIdBySubdomain(subdomain) {
   return subdomainIndex.get(subdomain) ?? null;
 }
@@ -112,4 +116,4 @@ async function screenshotProject(subdomain) {
   }
 }
 
-module.exports = { slugify, getPublishedUrl, buildProject, isBuilt, getDistDir, registerSubdomain, findJobIdBySubdomain, screenshotProject };
+module.exports = { slugify, getPublishedUrl, buildProject, isBuilt, getDistDir, registerSubdomain, unregisterSubdomain, findJobIdBySubdomain, screenshotProject };
