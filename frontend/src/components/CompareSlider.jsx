@@ -45,7 +45,11 @@ export default function CompareSlider({ original, redesign }) {
 
         {/* Original (Clip path overlay) */}
         <div style={{ ...s.originalImgWrap, width: `${sliderPos}%` }}>
-          <img src={original.startsWith('data:') ? original : `data:image/webp;base64,${original}`} style={s.img} alt="Original" />
+          {original ? (
+            <img src={original.startsWith('data:') ? original : `data:image/webp;base64,${original}`} style={s.img} alt="Original" />
+          ) : (
+            <div style={s.placeholder}>No original screenshot available.</div>
+          )}
           <div style={s.badgeOriginal}>Original</div>
         </div>
 
