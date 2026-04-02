@@ -26,15 +26,18 @@ function slugify(name = '') {
 }
 
 function getPublishedUrl(subdomain) {
-  const isLocal = APP_URL.startsWith('localhost');
+  // Strip any protocol prefix so APP_URL works whether set to
+  // "websight.pro" or "https://websight.pro"
+  const cleanDomain = APP_URL.replace(/^https?:\/\//, '');
+  const isLocal = cleanDomain.startsWith('localhost');
   if (isLocal) {
     // e.g. http://stripe.localhost:3001
-    const port = APP_URL.split(':')[1] || '3001';
+    const port = cleanDomain.split(':')[1] || '3001';
     return `http://${subdomain}.localhost:${port}`;
   }
   // e.g. https://stripe.myapp.com
   const proto = process.env.NODE_ENV === 'production' ? 'https' : 'http';
-  return `${proto}://${subdomain}.${APP_URL}`;
+  return `${proto}://${subdomain}.${cleanDomain}`;
 }
 
 function registerSubdomain(subdomain, jobId) {
