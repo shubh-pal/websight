@@ -170,8 +170,32 @@ function createJob(id, data = {}) {
 }
 
 function updateJob(id, updates) {
-  const job = jobs.get(id);
-  if (!job) return null;
+  let job = jobs.get(id);
+  if (!job) {
+    job = {
+      id,
+      status: null,
+      step: 0,
+      stepName: null,
+      logs: [],
+      files: null,
+      tree: null,
+      zipPath: null,
+      projectName: null,
+      tokens: null,
+      error: null,
+      createdAt: Date.now(),
+      userId: null,
+      url: null,
+      framework: null,
+      model: null,
+      publishStatus: null,
+      publishedSubdomain: null,
+      publishError: null,
+      redesignScreenshot: null,
+    };
+    jobs.set(id, job);
+  }
   Object.assign(job, updates);
   saveJobs();
   broadcast(id, job);
