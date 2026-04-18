@@ -1295,7 +1295,246 @@ export default function ${safeName}() {
 }
 
 function buildDeterministicComponentFallback(name, tokens, siteData, framework, profile = {}) {
-  if (framework !== 'react' || !profile.compactHome) return null;
+  if (framework !== 'react') return null;
+
+  if (name === 'Header') {
+    const navLinks = (tokens.navLinks || []).slice(0, 5);
+    const brandName = tokens.brandName || siteData.title || 'Brand';
+    const cta = tokens.ctaLanguage || 'Contact us';
+    const navJson = JSON.stringify(navLinks.length ? navLinks : [
+      { text: 'Home', path: '/' },
+      { text: 'About', path: '/about' },
+      { text: 'Services', path: '/services' },
+      { text: 'Insights', path: '/insights' },
+      { text: 'Contact', path: '/contact' },
+    ], null, 2);
+
+    return `import { useEffect, useState } from 'react';
+import { Link, useLocation } from 'react-router-dom';
+import '../styles/tokens.css';
+
+const navLinks = ${navJson};
+
+export default function Header() {
+  const [scrolled, setScrolled] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const location = useLocation();
+
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 16);
+    onScroll();
+    window.addEventListener('scroll', onScroll);
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
+  useEffect(() => {
+    setMobileMenuOpen(false);
+  }, [location.pathname]);
+
+  return (
+    <header className={\`fallback-header \${scrolled ? 'is-scrolled' : ''}\`}>
+      <style>{\`
+        .fallback-header {
+          position: sticky;
+          top: 0;
+          z-index: 50;
+          width: 100%;
+          backdrop-filter: blur(18px);
+          background: rgba(var(--bg-rgb), 0.82);
+          border-bottom: 1px solid transparent;
+          transition: var(--transition);
+        }
+        .fallback-header.is-scrolled {
+          border-bottom-color: rgba(var(--border-rgb), 0.9);
+          box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+        }
+        .fallback-header__inner {
+          position: relative;
+          max-width: var(--container);
+          margin: 0 auto;
+          padding: 16px 24px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 20px;
+        }
+        .fallback-header__brand {
+          color: var(--text);
+          text-decoration: none;
+          font-family: var(--font-heading);
+          font-size: 1.05rem;
+          font-weight: 800;
+          letter-spacing: -0.03em;
+        }
+        .fallback-header__nav {
+          display: flex;
+          align-items: center;
+          gap: 18px;
+        }
+        .fallback-header__link {
+          color: var(--text-muted);
+          text-decoration: none;
+          font-size: 0.95rem;
+          transition: var(--transition);
+        }
+        .fallback-header__link:hover,
+        .fallback-header__link.is-active {
+          color: var(--text);
+        }
+        .fallback-header__cta {
+          padding: 10px 16px;
+          border-radius: var(--radius-pill);
+          background: var(--gradient);
+          color: white;
+          text-decoration: none;
+          font-weight: 700;
+          box-shadow: 0 10px 24px rgba(var(--primary-rgb), 0.22);
+          transition: var(--transition);
+        }
+        .fallback-header__cta:hover {
+          transform: translateY(-1px);
+          box-shadow: 0 16px 30px rgba(var(--primary-rgb), 0.28);
+        }
+        .fallback-header__toggle {
+          display: none;
+          border: 1px solid var(--border);
+          background: var(--bg);
+          color: var(--text);
+          border-radius: var(--radius);
+          padding: 10px 12px;
+          cursor: pointer;
+        }
+        @media (max-width: 900px) {
+          .fallback-header__toggle {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+          }
+          .fallback-header__nav {
+            position: absolute;
+            top: calc(100% + 8px);
+            left: 24px;
+            right: 24px;
+            display: none;
+            flex-direction: column;
+            align-items: stretch;
+            gap: 10px;
+            padding: 16px;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-lg);
+          }
+          .fallback-header__nav.is-open {
+            display: flex;
+          }
+          .fallback-header__cta {
+            display: none;
+          }
+        }
+      \`}</style>
+      <div className="fallback-header__inner">
+        <Link className="fallback-header__brand" to="/">${brandName}</Link>
+        <button
+          type="button"
+          className="fallback-header__toggle"
+          onClick={() => setMobileMenuOpen((open) => !open)}
+          aria-label="Toggle navigation"
+          aria-expanded={mobileMenuOpen}
+        >
+          {mobileMenuOpen ? 'Close' : 'Menu'}
+        </button>
+        <nav className={\`fallback-header__nav \${mobileMenuOpen ? 'is-open' : ''}\`}>
+          {navLinks.map((link) => (
+            <Link
+              key={link.path}
+              to={link.path}
+              className={\`fallback-header__link \${location.pathname === link.path ? 'is-active' : ''}\`}
+            >
+              {link.text}
+            </Link>
+          ))}
+        </nav>
+        <Link className="fallback-header__cta" to="/contact">
+          ${cta}
+        </Link>
+      </div>
+    </header>
+  );
+}
+`;
+  }
+
+  if (name === 'Footer') {
+    const brandName = tokens.brandName || siteData.title || 'Brand';
+    const description = siteData.description || tokens.tagline || `${brandName} delivers a polished digital experience built for clarity, trust, and growth.`;
+
+    return `import '../styles/tokens.css';
+
+export default function Footer() {
+  return (
+    <footer className="fallback-footer">
+      <style>{\`
+        .fallback-footer {
+          width: 100%;
+          padding: 56px 0 40px;
+          background: #0f1117;
+          color: rgba(255, 255, 255, 0.88);
+          border-top: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .fallback-footer__inner {
+          max-width: var(--container);
+          margin: 0 auto;
+          padding: 0 24px;
+          display: grid;
+          gap: 18px;
+        }
+        .fallback-footer__brand {
+          font-family: var(--font-heading);
+          font-size: 1.1rem;
+          font-weight: 800;
+          letter-spacing: -0.03em;
+        }
+        .fallback-footer__text {
+          max-width: 640px;
+          color: rgba(255, 255, 255, 0.68);
+          line-height: 1.7;
+        }
+        .fallback-footer__meta {
+          color: rgba(255, 255, 255, 0.5);
+          font-size: 0.9rem;
+        }
+      \`}</style>
+      <div className="fallback-footer__inner">
+        <div className="fallback-footer__brand">${brandName}</div>
+        <p className="fallback-footer__text">${description}</p>
+        <div className="fallback-footer__meta">© 2026 ${brandName}. All rights reserved.</div>
+      </div>
+    </footer>
+  );
+}
+`;
+  }
+
+  if (name === 'Layout') {
+    return `import Header from './Header';
+import Footer from './Footer';
+
+export default function Layout({ children }) {
+  return (
+    <>
+      <Header />
+      <main className="layout-main">
+        {children}
+      </main>
+      <Footer />
+    </>
+  );
+}
+`;
+  }
+
+  if (!profile.compactHome) return null;
 
   if (name === 'Hero') {
     const eyebrow = tokens.tagline || `${tokens.brandName} for modern teams`;
@@ -1922,6 +2161,14 @@ async function generateSingleFile(prompt, framework, ai, onLog = () => {}, cssCo
     jsx = fixJsxTagBalance(jsx);
   }
 
+  const remainingIssues = detectSyntaxIssues(jsx);
+  const stillTruncated = isTruncated(jsx);
+  if (remainingIssues.length > 0 || stillTruncated) {
+    const reasons = [...remainingIssues];
+    if (stillTruncated) reasons.push('output still appears truncated');
+    throw new Error(`Invalid generated component: ${reasons.join('; ')}`);
+  }
+
   // ── Call 2: CSS for this component ───────────────────────────────────────
   // Extract every className from the JSX so the CSS call knows exactly what to style
   const classNames = [...new Set(
@@ -2291,6 +2538,12 @@ function detectSyntaxIssues(code) {
   const cssVarPropMatches = code.match(CSS_FUNCS_RE) || [];
   if (cssVarPropMatches.length > 0) {
     issues.push(`CSS functions as JSX prop expressions — use string syntax instead: ={var(--x)} → ="var(--x)" (${cssVarPropMatches.length} occurrence(s))`);
+  }
+
+  const trimmed = code.trim();
+  const lastLine = trimmed.split('\n').pop() || '';
+  if (trimmed && isTruncated(trimmed) && lastLine.length > 0) {
+    issues.push(`file appears truncated near ending: "${lastLine.slice(0, 80)}"`);
   }
 
   return issues;
