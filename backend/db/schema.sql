@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS jobs (
   publish_status TEXT,
   published_subdomain TEXT,
   publish_error TEXT,
+  original_screenshot TEXT,
   redesign_screenshot TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()

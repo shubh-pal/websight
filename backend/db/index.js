@@ -52,6 +52,7 @@ async function ensureSchema() {
   await pool.query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS publish_status TEXT;`);
   await pool.query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS published_subdomain TEXT;`);
   await pool.query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS publish_error TEXT;`);
+  await pool.query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS original_screenshot TEXT;`);
   await pool.query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS redesign_screenshot TEXT;`);
 
   const adminEmails = (process.env.ADMIN_EMAILS || 'shubhpalan@gmail.com')

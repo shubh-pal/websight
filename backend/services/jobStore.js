@@ -151,6 +151,7 @@ function createJob(id, data = {}) {
     publishStatus: data.publishStatus || null,
     publishedSubdomain: data.publishedSubdomain || null,
     publishError: data.publishError || null,
+    originalScreenshot: data.originalScreenshot || null,
     redesignScreenshot: data.redesignScreenshot || null,
   };
   jobs.set(id, job);
@@ -196,6 +197,7 @@ function updateJob(id, updates) {
       publishStatus: null,
       publishedSubdomain: null,
       publishError: null,
+      originalScreenshot: null,
       redesignScreenshot: null,
     };
     jobs.set(id, job);
@@ -216,6 +218,7 @@ function updateJob(id, updates) {
     if (updates.publishStatus !== undefined) dbUpdates.publish_status = updates.publishStatus;
     if (updates.publishedSubdomain !== undefined) dbUpdates.published_subdomain = updates.publishedSubdomain;
     if (updates.publishError !== undefined) dbUpdates.publish_error = updates.publishError;
+    if (updates.originalScreenshot !== undefined) dbUpdates.original_screenshot = updates.originalScreenshot;
     if (updates.redesignScreenshot !== undefined) dbUpdates.redesign_screenshot = updates.redesignScreenshot;
 
     if (Object.keys(dbUpdates).length > 0) {
@@ -253,6 +256,7 @@ async function getJob(id) {
           publishStatus: row.publish_status,
           publishedSubdomain: row.published_subdomain,
           publishError: row.publish_error,
+          originalScreenshot: row.original_screenshot,
           redesignScreenshot: row.redesign_screenshot,
           url: row.url,
           framework: row.framework,
@@ -340,7 +344,7 @@ async function getUserJobs(userId) {
   try {
     const result = await db.query(
       `SELECT id, user_id, status, project_name, url, framework, model, error,
-              publish_status, published_subdomain, publish_error, redesign_screenshot,
+              publish_status, published_subdomain, publish_error, original_screenshot, redesign_screenshot,
               created_at, updated_at
        FROM jobs
        WHERE user_id = $1
@@ -359,6 +363,7 @@ async function getUserJobs(userId) {
       publishStatus: row.publish_status,
       publishedSubdomain: row.published_subdomain,
       publishError: row.publish_error,
+      originalScreenshot: row.original_screenshot,
       redesignScreenshot: row.redesign_screenshot,
       createdAt: new Date(row.created_at).getTime(),
       updatedAt: new Date(row.updated_at).getTime(),

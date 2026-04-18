@@ -223,6 +223,8 @@ async function replayFromCache(newJobId, cachedJobId, url, framework, model) {
     s3Prefix,
     projectName,
     tokens: cached.tokens,
+    originalScreenshot: cached.originalScreenshot || null,
+    redesignScreenshot: cached.redesignScreenshot || null,
     fromCache: true,
   });
   addLog(newJobId, '🎉 Your project is ready to download!');
