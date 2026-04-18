@@ -139,6 +139,16 @@ app.use(cors({
   methods: ['GET', 'POST', 'DELETE', 'PUT'],
   credentials: true,
 }));
+
+// Dynamic API responses should never be cached by the browser or intermediary proxies.
+// Stale job payloads can leave the result page stuck without loading files.
+app.use('/api', (req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  next();
+});
+
 app.use(express.json({ limit: '50mb' }));
 
 // Rate limiting on redesign endpoint (20 requests per hour per IP)
