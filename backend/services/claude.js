@@ -3,6 +3,7 @@ const path = require('path');
 const { createAIClient } = require('./aiClient');
 const { getDesignSystem, buildDesignIntelligenceBlock } = require('./designIntelligence');
 const { fetchAllComponentReferences, buildReferenceBlock } = require('./componentFetcher');
+const { getImageLibrary } = require('./unsplash');
 
 const FREE_TIER_MODELS = new Set(['gemini-2.5-flash', 'gemini-2.5-flash-lite']);
 
@@ -74,13 +75,19 @@ async function generateRedesign(siteData, framework = 'react', onProgress = () =
     : await generateScenePlan(tokens, creativeDirection, ai, (msg) => onProgress(3, msg), profile);
   onProgress(3, `Scenes — ${(scenePlan.scenes || []).map(s => s.name).join(' → ')}`);
 
+  onProgress(3, 'Finding image references…');
+  const imageLibrary = await getImageLibrary(siteData, tokens);
+  if (imageLibrary.photos?.length) {
+    onProgress(3, `Found ${imageLibrary.photos.length} Unsplash image candidates`);
+  }
+
   onProgress(4, 'Generating shared components…');
-  const components = await generateComponents(tokens, creativeDirection, scenePlan, siteData, framework, ai, (msg) => onProgress(4, msg), componentRefs, diBlock, profile);
+  const components = await generateComponents(tokens, creativeDirection, scenePlan, siteData, framework, ai, (msg) => onProgress(4, msg), componentRefs, diBlock, profile, imageLibrary.promptBlock || '');
 
   onProgress(5, 'Generating pages…');
   const pages = profile.useDeterministicHomeAssembly
     ? buildDeterministicPages(tokens, components, framework, profile)
-    : await generatePages(tokens, creativeDirection, scenePlan, components, siteData, framework, ai, (msg) => onProgress(5, msg), profile);
+    : await generatePages(tokens, creativeDirection, scenePlan, components, siteData, framework, ai, (msg) => onProgress(5, msg), profile, imageLibrary.promptBlock || '');
 
   onProgress(6, 'Assembling project boilerplate…');
   const boilerplate = buildBoilerplate(tokens, siteData, framework, pages);
@@ -616,7 +623,7 @@ Return ONLY this JSON:
 
 // ─── Step 2: Components ───────────────────────────────────────────────────────
 
-async function generateComponents(tokens, creativeDirection, scenePlan, siteData, framework, ai, onLog = () => {}, componentRefs = {}, diBlock = '', profile = {}) {
+async function generateComponents(tokens, creativeDirection, scenePlan, siteData, framework, ai, onLog = () => {}, componentRefs = {}, diBlock = '', profile = {}, imageLibraryBlock = '') {
   const isReact = framework === 'react';
   const ext     = isReact ? 'jsx' : 'ts';
   const compDir = isReact ? 'src/components' : 'src/app/components';
@@ -757,6 +764,7 @@ Return ONLY raw file. No markdown fences.`,
 
 ${tokenCtx}
 ${siteCtx}
+${imageLibraryBlock}
 ${creativeBlock}
 ${buildSceneBlock(heroScene)}
 
@@ -819,6 +827,7 @@ Return ONLY raw file from imports. No markdown fences.`,
       prompt: () => `Design a visually distinctive Features section for "${tokens.brandName}" (${tokens.siteType}). This must feel custom — not a generic feature grid.
 ${tokenCtx}
 ${siteCtx}
+${imageLibraryBlock}
 ${creativeBlock}
 ${buildSceneBlock(featScene)}
 
@@ -859,6 +868,7 @@ Return ONLY complete raw JSX file.`
     Testimonials: {
       prompt: () => `Design a compelling Testimonials section for "${tokens.brandName}" that feels emotionally real — not like AI filler.
 ${tokenCtx}
+${imageLibraryBlock}
 ${creativeBlock}
 ${buildSceneBlock(testScene)}
 
@@ -896,6 +906,7 @@ Return ONLY complete raw JSX file.`
     CTA: {
       prompt: () => `Design an emotionally resonant, visually striking CTA section for "${tokens.brandName}" — this is the LAST IMPRESSION. Make it unforgettable.
 ${tokenCtx}
+${imageLibraryBlock}
 ${creativeBlock}
 ${buildSceneBlock(ctaScene)}
 
@@ -926,6 +937,7 @@ Return ONLY complete raw JSX file.`
     Stats: {
       prompt: () => `Design a Stats section for "${tokens.brandName}" that makes numbers feel like a story — not a uniform data table.
 ${tokenCtx}
+${imageLibraryBlock}
 ${creativeBlock}
 ${buildSceneBlock(statsScene)}
 
@@ -1058,7 +1070,7 @@ ${diBlock ? `\nINDUSTRY DESIGN RULES:\n${diBlock}` : ''}`;
 
 // ─── Step 3: Pages ────────────────────────────────────────────────────────────
 
-async function generatePages(tokens, creativeDirection, scenePlan, components, siteData, framework, ai, onLog = () => {}, profile = {}) {
+async function generatePages(tokens, creativeDirection, scenePlan, components, siteData, framework, ai, onLog = () => {}, profile = {}, imageLibraryBlock = '') {
   const isReact = framework === 'react';
   const ext     = isReact ? 'jsx' : 'ts';
   const pageDir = isReact ? 'src/pages' : 'src/app/pages';
@@ -1116,6 +1128,7 @@ ${profile.compactHome
 
 ${tokenCtx}
 ${siteCtx}
+${imageLibraryBlock}
 
 AVAILABLE COMPONENTS (import ALL relevant ones from '../components/X'):
 ${compNames.join(', ')}

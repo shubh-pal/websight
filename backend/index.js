@@ -17,6 +17,7 @@ const contactRouter = require('./routes/contact');
 const waitlistRouter = require('./routes/waitlist');
 const analyticsRouter = require('./routes/analytics');
 const adminRouter = require('./routes/admin');
+const imagesRouter = require('./routes/images');
 const { findJobIdBySubdomain, getDistDir, registerSubdomain } = require('./services/publisher');
 const path = require('path');
 const fs = require('fs');
@@ -82,6 +83,8 @@ app.use(helmet({
         "'self'",
         'data:',
         'blob:',
+        'https://images.unsplash.com',
+        'https://plus.unsplash.com',
         'https://lh3.googleusercontent.com',
         'https://*.googleusercontent.com',
         'https://*.google.com',
@@ -156,6 +159,7 @@ app.use('/api/jobs', publishRouter);
 app.use('/api/contact', contactRouter);
 app.use('/api/waitlist', waitlistRouter);
 app.use('/api/analytics', analyticsRouter);
+app.use('/api/images', imagesRouter);
 app.use('/api/admin', adminRouter);
 
 // Health check endpoint
