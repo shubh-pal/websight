@@ -169,6 +169,10 @@ function createJob(id, data = {}) {
   return job;
 }
 
+function isPlaceholderJob(job) {
+  return !!job && job.status == null && job.projectName == null && job.url == null && job.framework == null && job.model == null;
+}
+
 function updateJob(id, updates) {
   let job = jobs.get(id);
   if (!job) {
@@ -229,7 +233,7 @@ function updateJob(id, updates) {
 
 async function getJob(id) {
   // Try memory first
-  if (jobs.has(id)) {
+  if (jobs.has(id) && !isPlaceholderJob(jobs.get(id))) {
     return jobs.get(id);
   }
 
@@ -256,6 +260,8 @@ async function getJob(id) {
           createdAt: new Date(row.created_at).getTime(),
           updatedAt: new Date(row.updated_at).getTime(),
         };
+        const existing = jobs.get(id);
+        jobs.set(id, existing ? { ...existing, ...job } : job);
         return job;
       }
     } catch (err) {
