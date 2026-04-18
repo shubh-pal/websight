@@ -4,12 +4,33 @@ const { createAIClient } = require('./aiClient');
 const { getDesignSystem, buildDesignIntelligenceBlock } = require('./designIntelligence');
 const { fetchAllComponentReferences, buildReferenceBlock } = require('./componentFetcher');
 
+const FREE_TIER_MODELS = new Set(['gemini-2.5-flash', 'gemini-2.5-flash-lite']);
+
+function getGenerationProfile(model = '') {
+  const isFreeTier = FREE_TIER_MODELS.has(model);
+  return {
+    isFreeTier,
+    compactHome: isFreeTier,
+    maxExtraSections: isFreeTier ? 2 : 4,
+    maxScenes: isFreeTier ? 3 : 5,
+  };
+}
+
+function chooseHomeSections(components = [], maxExtraSections = 4) {
+  const unique = [...new Set((components || []).filter(Boolean))];
+  const preferredOrder = ['Features', 'CTA', 'Stats', 'Testimonials', 'Pricing', 'FAQ'];
+  const prioritized = preferredOrder.filter((name) => unique.includes(name));
+  const remainder = unique.filter((name) => !preferredOrder.includes(name));
+  return [...prioritized, ...remainder].slice(0, maxExtraSections);
+}
+
 /**
  * Master pipeline: analyze → creativeDirection → scenePlan → components → pages → boilerplate
  * model: 'gemini-2.5-flash' | 'claude-opus-4-5' | etc.
  */
 async function generateRedesign(siteData, framework = 'react', onProgress = () => {}, model = 'gemini-2.5-pro', keyOverrides = {}) {
   const ai = createAIClient(model, keyOverrides);
+  const profile = getGenerationProfile(model);
 
   // ── Design Intelligence: run before any AI call so every prompt benefits ──
   onProgress(1, 'Loading design intelligence…');
@@ -23,6 +44,11 @@ async function generateRedesign(siteData, framework = 'react', onProgress = () =
 
   onProgress(1, `Analyzing brand identity… [${model}]`);
   const tokens = await analyzeAndTokenize(siteData, ai, (msg) => onProgress(1, msg), designSystem);
+  if (profile.compactHome) {
+    const limitedComponents = chooseHomeSections(tokens.components, profile.maxExtraSections);
+    tokens.components = limitedComponents;
+    onProgress(1, `Free-model compact mode → Home will use ${['Hero', ...limitedComponents].join(' + ')}`);
+  }
   onProgress(1, `Brand analyzed — ${tokens.brandName} · ${tokens.styleArchetype || tokens.siteType} · ${tokens.brandPersonality || ''}`);
 
   onProgress(2, 'Generating creative direction…');
@@ -30,14 +56,14 @@ async function generateRedesign(siteData, framework = 'react', onProgress = () =
   onProgress(2, `Creative direction — ${(creativeDirection.designConcept || '').slice(0, 70)}…`);
 
   onProgress(3, 'Planning page scenes…');
-  const scenePlan = await generateScenePlan(tokens, creativeDirection, ai, (msg) => onProgress(3, msg));
+  const scenePlan = await generateScenePlan(tokens, creativeDirection, ai, (msg) => onProgress(3, msg), profile);
   onProgress(3, `Scenes — ${(scenePlan.scenes || []).map(s => s.name).join(' → ')}`);
 
   onProgress(4, 'Generating shared components…');
-  const components = await generateComponents(tokens, creativeDirection, scenePlan, siteData, framework, ai, (msg) => onProgress(4, msg), componentRefs, diBlock);
+  const components = await generateComponents(tokens, creativeDirection, scenePlan, siteData, framework, ai, (msg) => onProgress(4, msg), componentRefs, diBlock, profile);
 
   onProgress(5, 'Generating pages…');
-  const pages = await generatePages(tokens, creativeDirection, scenePlan, components, siteData, framework, ai, (msg) => onProgress(5, msg));
+  const pages = await generatePages(tokens, creativeDirection, scenePlan, components, siteData, framework, ai, (msg) => onProgress(5, msg), profile);
 
   onProgress(6, 'Assembling project boilerplate…');
   const boilerplate = buildBoilerplate(tokens, siteData, framework, pages);
@@ -314,20 +340,39 @@ Return ONLY this JSON (no markdown, no backticks, all fields filled):
 // Generates a rich, opinionated creative brief unique to this brand.
 // Expands on the basic creativeDirection seeded in analyzeAndTokenize.
 
+function deriveDesignTension(tokens = {}) {
+  const archetype = tokens.styleArchetype || '';
+  const personality = tokens.brandPersonality || '';
+  const maturity = tokens.visualMaturity || '';
+
+  if (['minimal-swiss', 'editorial-luxury', 'neo-banking'].includes(archetype)) {
+    return 'restrained vs bold';
+  }
+  if (['tech-futuristic', 'gradient-saas', 'glassmorphism'].includes(archetype)) {
+    return 'precise vs fluid';
+  }
+  if (['playful-startup', 'brutalism'].includes(archetype)) {
+    return 'structured vs expressive';
+  }
+  if (personality === 'corporate' || maturity === 'elite') {
+    return 'calm vs energetic';
+  }
+  return 'minimal vs expressive';
+}
+
 async function generateCreativeDirection(tokens, siteData, ai, onLog = () => {}, diBlock = '') {
-  const system = `You are an avant-garde creative director who designs websites that win awards and stop people mid-scroll.
-You REJECT safe, templated thinking. Every output must feel designed for THIS brand specifically.
+  const system = `You are a senior creative director and product designer.
+Your priority order is:
+1. Ship a clean, coherent, working website
+2. Make it feel brand-appropriate and polished
+3. Add distinction only when it does NOT reduce usability or implementation stability
+The result should feel intentionally designed, but never fragile, chaotic, or over-styled.
 Return ONLY valid JSON. No markdown. No explanation.`;
 
   const existing  = tokens.creativeDirection || {};
   const archetype = tokens.styleArchetype || 'gradient-saas';
 
-  const designTensions = [
-    'minimal vs expressive', 'structured vs organic', 'calm vs energetic',
-    'precise vs fluid', 'restrained vs bold', 'dark vs luminous',
-    'serious vs playful', 'corporate vs avant-garde',
-  ];
-  const assignedTension = designTensions[Math.floor(Math.random() * designTensions.length)];
+  const assignedTension = deriveDesignTension(tokens);
 
   const user = `Create a deep, opinionated creative direction for "${tokens.brandName}" (${tokens.siteType}).
 
@@ -349,6 +394,11 @@ Description: ${(siteData.description || '').slice(0, 200)}
 Top headings: ${JSON.stringify((siteData.headings || []).slice(0, 5))}
 
 ${diBlock ? `Industry design intelligence (apply these principles to your direction):\n${diBlock}` : ''}
+
+IMPORTANT:
+- Prefer a strong but realistic direction that can be built reliably in HTML/CSS
+- Avoid directions that require heavy layering, complex overlaps, or experimental positioning to work
+- Favor clarity, rhythm, hierarchy, and responsive stability over novelty
 
 Return ONLY this JSON:
 {
@@ -389,12 +439,13 @@ Return ONLY this JSON:
 // Replaces generateLayoutStrategy — produces a cinematic scene-by-scene plan
 // that drives component generation and page assembly order.
 
-async function generateScenePlan(tokens, creativeDirection, ai, onLog = () => {}) {
-  const system = `You are a master narrative designer who builds website experiences like film directors build scenes.
-Each section of the page is a "scene" with a specific goal, mood, and visual approach.
+async function generateScenePlan(tokens, creativeDirection, ai, onLog = () => {}, profile = {}) {
+  const system = `You are a senior web designer planning a high-quality marketing page.
+Each section is a scene with a clear purpose, but the full page must remain cohesive, responsive, and easy to implement.
 Return ONLY valid JSON. No markdown. No explanation.`;
 
   const comps     = tokens.components || ['Features', 'Testimonials', 'CTA', 'Stats'];
+  const totalScenes = Math.max(1, Math.min(profile.maxScenes || 5, comps.length + 1));
   const archetype = tokens.styleArchetype || 'gradient-saas';
 
   const user = `Design a cinematic scene plan for "${tokens.brandName}" (${tokens.siteType}).
@@ -413,12 +464,13 @@ Style archetype: ${archetype}
 Brand: ${tokens.brandPersonality} targeting ${tokens.targetAudience}
 
 SCENE DESIGN RULES:
-1. Design 4–6 scenes total. Hero is always scene 1. Use ALL available component types.
-2. Each scene must have a DISTINCT visual treatment — no two scenes can feel the same.
-3. Alternate density: dense scene MUST be followed by airy scene.
-4. At least ONE scene must be visually unconventional (not a standard layout).
-5. Background rhythm creates drama — not all light, not all dark.
-6. Sequence tells a story: hook → proof → emotion → conversion.
+1. Design exactly ${totalScenes} scenes total. Hero is always scene 1. Use ALL available component types.
+2. The page must feel cohesive, not like unrelated sections stitched together.
+3. Alternate rhythm gently: do not make every section identical, but avoid jarring shifts.
+4. Prefer proven layouts that are visually strong and easy to implement responsively.
+5. Background rhythm should create contrast without breaking continuity.
+6. Sequence tells a story: hook → proof → detail → trust → conversion.
+7. Do NOT introduce experimental or hard-to-implement section ideas unless they remain simple in CSS.
 
 Layout options per component:
 - Hero: centered | split-left | split-right | asymmetric | immersive | editorial
@@ -484,7 +536,7 @@ Return ONLY this JSON:
 
 // ─── Step 2: Components ───────────────────────────────────────────────────────
 
-async function generateComponents(tokens, creativeDirection, scenePlan, siteData, framework, ai, onLog = () => {}, componentRefs = {}, diBlock = '') {
+async function generateComponents(tokens, creativeDirection, scenePlan, siteData, framework, ai, onLog = () => {}, componentRefs = {}, diBlock = '', profile = {}) {
   const isReact = framework === 'react';
   const ext     = isReact ? 'jsx' : 'ts';
   const compDir = isReact ? 'src/components' : 'src/app/components';
@@ -533,12 +585,12 @@ Layout energy: ${layoutEnergy} | Density: ${density} | Design tension: ${designT
 ${doNotDo   ? `AVOID: ${doNotDo}` : ''}
 ${mustHave  ? `MUST INCLUDE: ${mustHave}` : ''}
 
-🔥 DESIGN OVERRIDE RULES — apply to EVERY component:
-- At least ONE element must break the grid or be positioned asymmetrically
-- Use layering: overlap elements, use z-index for depth, avoid flat same-plane layouts
-- Typography must vary dramatically in scale — giant headings next to fine print
-- At least ONE edge-to-edge full-bleed treatment in the section
-- This component must feel crafted by a human designer with a strong opinion — not generated by AI.
+🔥 STABILITY + QUALITY RULES — apply to EVERY component:
+- Start from a simple, proven responsive layout before adding any flourish
+- Prefer clean hierarchy, spacing, alignment, and contrast over visual tricks
+- Keep decorative effects lightweight and optional, never structurally necessary
+- Avoid unnecessary overlap, absolute positioning, or broken-grid compositions unless clearly justified
+- The section should feel polished and intentional, but still easy to maintain and unlikely to break
 ${diBlock ? `\n${diBlock}` : ''}`;
 
   // NOTE: tokens.css is NOT AI-generated — built deterministically in buildBoilerplate().
@@ -630,6 +682,11 @@ ${buildSceneBlock(heroScene)}
 
 STYLING: <style>{\`...\`}</style> first, "hero-" prefixed classes, @media (max-width: 768px) + (max-width: 480px).
 
+PRIMARY GOAL:
+- Build a clean, high-confidence hero that looks good immediately
+- Prefer clarity and hierarchy over spectacle
+- Keep the visual system simple enough to render reliably on desktop and mobile
+
 LAYOUT TYPE: "${heroLayout}" — follow this strictly:
 ${heroLayout === 'split-left'    ? '- Split: text LEFT (max-width 520px), visual element RIGHT. Equal columns. Text left-aligned.' : ''}
 ${heroLayout === 'split-right'   ? '- Split: visual LEFT, text RIGHT (max-width 520px). Text left-aligned.' : ''}
@@ -644,10 +701,15 @@ ${(heroScene?.background || 'gradient') === 'gradient'? '- Gradient bg: var(--gr
 ${(heroScene?.background || '') === 'light'           ? '- Light bg: var(--bg), clean and airy.' : ''}
 ${(heroScene?.background || '') === 'pattern'         ? '- Pattern bg: CSS radial-gradient dots or repeating line grid overlay.' : ''}
 
-VISUAL ELEMENT: ${heroScene?.visualHook || 'bold gradient headline with decorative background element'}
+VISUAL ELEMENT: ${heroScene?.visualHook || 'bold headline with restrained decorative background element'}
 ${heroVisual === 'blobs'         ? '- 2-3 blurred gradient blobs (position:absolute, filter:blur(80px), opacity:0.35, 300-600px circles)' : ''}
 ${heroVisual === 'abstract-grid' ? '- Subtle CSS grid/dot pattern overlay + geometric line shapes' : ''}
 ${heroVisual === 'minimal'       ? '- Zero visual decoration. Typography IS the design. Maximum white space.' : ''}
+
+IMPLEMENTATION GUARDRAILS:
+- Do not rely on complex absolute positioning for core content layout
+- Decorative background elements must never overlap or hide important text/buttons
+- Mobile layout must stack cleanly with comfortable spacing and readable type
 
 HERO MOOD: ${creativeDirection.heroMood || `Premium ${archetype} feel — ${tokens.brandPersonality} and ${toneOfVoice}`}
 
@@ -685,11 +747,12 @@ STYLING: <style>{\`...\`}</style> with "feat-" prefixed classes. @media (max-wid
 BACKGROUND: "${featScene?.background || 'light'}" section.
 DENSITY: "${featScene?.density || 'balanced'}" — ${featScene?.density === 'dense' ? 'pack in more information, tighter spacing, data-rich' : featScene?.density === 'airy' ? 'generous whitespace, breathe, calm' : 'balanced rhythm'}
 
-STRUCTURE RULES (override generic defaults):
-- DO NOT default to equal uniform cards — vary emphasis and visual hierarchy
-- At least ONE feature must be visually dominant (larger, different treatment, spans 2 columns)
-- Apply the visual motif "${visualMotif}" as a recurring accent element across cards
-- TWIST TO IMPLEMENT: "${featScene?.twist || 'One dominant oversized feature card'}"
+STRUCTURE RULES:
+- Do NOT default to weak filler cards
+- Use clear hierarchy with one emphasized feature if the layout supports it
+- Apply the visual motif "${visualMotif}" as a restrained recurring accent
+- TWIST TO IMPLEMENT: "${featScene?.twist || 'One dominant feature card'}"
+- Keep card structure simple and robust — avoid layouts that are likely to collapse responsively
 
 LAYOUT: "${featLayout}" — implement this layout type precisely:
 ${featLayout === '3-col-grid'        ? '- 3-column equal grid → 2-col tablet → 1-col mobile. Uniform card heights. But: first card spans 2 columns or is visually elevated.' : ''}
@@ -728,6 +791,7 @@ TWIST: "${testScene?.twist || 'Featured center card with brand accent border'}" 
 CONTENT RULES (critical — generic testimonials destroy credibility):
 Each testimonial MUST include: (1) a specific scenario/context, (2) a measurable outcome or metric, (3) emotional resonance authentic to "${tokens.targetAudience}"
 NO generic phrases like "highly recommend" or "great experience" — write vivid, specific, believable quotes.
+Keep the card structure visually clean and easy to scan.
 
 LAYOUT: "${testLayout}"
 ${testLayout === '3-col'            ? '- 3 equal columns, uniform cards.' : ''}
@@ -796,6 +860,7 @@ HIERARCHY RULES (numbers as storytelling):
 - 1 hero stat (largest, most impactful number) + 3 supporting stats
 - Each number gets a contextual micro-label beneath it (story-driven, e.g. "spanning 7 offices" not just "offices")
 - Apply visual motif "${visualMotif}" as a subtle accent
+- Keep the section simple and readable — no overcomplicated counter UI or decorative clutter
 
 LAYOUT: "${statsLayout}"
 ${statsLayout === '4-col-dividers'   ? '- 4 equal columns, 1px var(--border) dividers between cells (border-right trick, last has none). Padding 48px 32px each cell.' : ''}
@@ -857,10 +922,12 @@ Return ONLY complete raw JSX file.`
   // Determine which extras to generate
   const requestedExtras = (tokens.components || []).filter(c => !['Header','Footer','Layout','Hero'].includes(c));
   const defaultExtras   = ['Features', 'Testimonials', 'CTA', 'Stats'];
-  const extrasToGenerate = [
-    ...requestedExtras.filter(n => extraDefs[n]),
-    ...defaultExtras.filter(n => !requestedExtras.includes(n)),
-  ].filter(n => extraDefs[n]).slice(0, 4);
+  const extrasToGenerate = profile.compactHome
+    ? requestedExtras.filter((name) => extraDefs[name]).slice(0, profile.maxExtraSections || 2)
+    : [
+        ...requestedExtras.filter(n => extraDefs[n]),
+        ...defaultExtras.filter(n => !requestedExtras.includes(n)),
+      ].filter(n => extraDefs[n]).slice(0, 4);
 
   const extras = extrasToGenerate.map(name => ({
     name: `${name}.${ext}`, dir: compDir,
@@ -904,7 +971,7 @@ ${diBlock ? `\nINDUSTRY DESIGN RULES:\n${diBlock}` : ''}`;
 
 // ─── Step 3: Pages ────────────────────────────────────────────────────────────
 
-async function generatePages(tokens, creativeDirection, scenePlan, components, siteData, framework, ai, onLog = () => {}) {
+async function generatePages(tokens, creativeDirection, scenePlan, components, siteData, framework, ai, onLog = () => {}, profile = {}) {
   const isReact = framework === 'react';
   const ext     = isReact ? 'jsx' : 'ts';
   const pageDir = isReact ? 'src/pages' : 'src/app/pages';
@@ -955,8 +1022,10 @@ ${mustHave ? `MUST INCLUDE: ${mustHave}` : ''}`;
       .map(c => `import ${c} from '../components/${c}';`)
       .join('\n');
 
-    const prompt = `Generate a COMPLETE, STUNNING, production-quality ${isReact ? 'React JSX' : 'Angular TS'} Home page for "${tokens.brandName}" (${tokens.siteType}).
-This is the ENTIRE website in one page — a rich, full-length landing page that tells a complete story.
+    const prompt = `Generate a COMPLETE, polished, production-quality ${isReact ? 'React JSX' : 'Angular TS'} Home page for "${tokens.brandName}" (${tokens.siteType}).
+${profile.compactHome
+  ? 'This must be a compact homepage for a rate-limited/free model: Header + Hero + exactly 2 additional sections + Footer. Keep it short, clear, and robust.'
+  : 'This is the ENTIRE website in one page — a cohesive, high-quality landing page that tells a complete story without unnecessary complexity.'}
 
 ${tokenCtx}
 ${siteCtx}
@@ -970,18 +1039,24 @@ ${buildPageStructure(pageName, compNames, tokens, scenePlan)}
 PAGE NARRATIVE: ${scenePlan?.pageNarrative || 'A compelling journey from brand discovery to conversion'}
 TRANSITION STYLE: ${scenePlan?.transitionStyle || 'seamless gradient flow'} — implement section transitions accordingly
 
-DESIGN MISSION — this page must feel PREMIUM and UNIQUE:
+DESIGN MISSION:
 - Style archetype: ${tokens.styleArchetype || 'professional'} — let this drive every visual decision
 - Creative concept: ${creativeDirection.designConcept || 'A distinctive premium experience'}
 - Visual motif: ${creativeDirection.visualMotif || ''} — weave through connecting elements
 - Background rhythm alternates per scene — dark sections create drama, light breathe
 - Scroll animations: ${tokens.scrollAnimation || 'fade-up'} with 80ms stagger between elements
 - Tone of voice: ${tokens.toneOfVoice || 'professional'} — reflect this in any inline text/labels
+- The page must look good before it looks clever: prioritize spacing, typography, contrast, and responsive structure
+- Prefer a stable, maintainable layout over experimental composition
+- Avoid CSS patterns that commonly break: fragile overlaps, excessive absolute positioning, layout hacks, or decorative elements that control structure
 
 CRITICAL STYLING RULES:
 - Use <style>{\`...\`}</style> CSS tag with "home-" prefixed class names for page-specific styles
 - Import and USE the Layout component to wrap all content
 - Use CSS variables throughout: var(--primary), var(--accent), var(--bg), etc.
+- Every section must be clearly separated, aligned to a consistent container, and work at tablet/mobile widths
+- The final page must render as a basic working website even if animations or decorative details are removed
+${profile.compactHome ? '- DO NOT add extra bespoke sections beyond the imported components. Keep the page compact.' : ''}
 
 REQUIRED IMPORTS:
 import Layout from '../components/Layout';
@@ -1113,31 +1188,47 @@ const JSX_SYSTEM = (isReact) => `You are a world-class ${isReact ? 'React/JSX' :
 5. All interactions (useState, useEffect, IntersectionObserver, scroll) go here
 6. Icons: use simple inline SVG with viewBox="0 0 24 24", max 2-3 path elements — NO giant SVG data arrays
 7. Data arrays (features, stats, testimonials): keep to 3-4 items, strings only (no JSX in data)
+8. Prefer simple, robust DOM structure over clever nesting or decorative wrapper bloat
+9. Build for responsive stability first: clean section > container > content structure
+10. Avoid unnecessary absolute-positioned DOM unless it is purely decorative
 
 ═══ CONTENT RULES ═══
 - NO Lorem ipsum — write real, specific content for this brand
 - NO placeholder text like "Feature title" or "Description here"
 - Text content belongs in JSX, not data arrays with JSX nodes
+- The output should still work as a strong basic website even with animations removed
 
 
-═══ REACTBITS ANIMATED COMPONENTS (mandatory — pre-installed in src/bits/) ═══
-These replace plain static text and white-box layouts. Import from '../bits/ComponentName'.
+═══ REACTBITS ANIMATED COMPONENTS (optional toolkit — pre-installed in src/bits/) ═══
+Use these ONLY when the brand/style profile clearly benefits from expressive motion. Import from '../bits/ComponentName'.
 
-TEXT EFFECTS — use on ALL major headings and taglines:
+MOTION PROFILE RULES (derive from STYLE ARCHETYPE + animation mood in prompt):
+- HIGH-MOTION profile (e.g. gradient-saas, tech-futuristic, playful-startup, glassmorphism, experimental/dynamic direction):
+  Prefer ReactBits sparingly for hero + cards. Use 1-3 effects max across the section set.
+- LOW-MOTION profile (e.g. minimal-swiss, editorial-luxury, neo-banking, brutalism, corporate/authoritative brands):
+  Keep layouts clean and mostly static. ReactBits are optional and minimal.
+  Do NOT use Particles/Aurora unless the scene explicitly asks for an immersive animated hero.
+- If animationMood is "none" or "subtle", default to static UI with at most one restrained effect.
+- When in doubt, DO NOT use ReactBits. A clean static section is better than a flashy broken one.
+- NEVER use ShinyText or GradientText for important text on white, pale, or low-contrast backgrounds.
+- On light heroes, prefer plain text or BlurText with a solid text color.
+
+TEXT EFFECTS — OPTIONAL, and only when contrast remains strong:
 
   import BlurText from '../bits/BlurText';
-  // Scroll blur-to-clear word reveal. Use on EVERY hero <h1> as the primary heading element.
+  // Scroll blur-to-clear word reveal. Safe default for hero headings because it can keep a solid color.
   <BlurText text="Your Headline" animateBy="words" delay={120} direction="top" className="hero-heading" />
 
   import GradientText from '../bits/GradientText';
   // Animated color gradient sweep inline inside headings — wrap 1–3 key words.
+  // Use ONLY on dark or clearly contrasted backgrounds.
   <h1 className="hero-heading">
     Build <GradientText colors={['#6d28d9','#ec4899','#f59e0b','#6d28d9']} animationSpeed={5}>Stunning</GradientText> Websites
   </h1>
 
   import ShinyText from '../bits/ShinyText';
-  // Metallic sheen. Use on badge/pill/label text and tagline spans.
-  <ShinyText text="✦ Premium Quality" speed={3} color="#a78bfa" shineColor="#ffffff" className="hero-badge" />
+  // Metallic sheen. Use only on dark/saturated backgrounds, or set disabled={true} for solid text fallback.
+  <ShinyText text="✦ Premium Quality" speed={3} color="#a78bfa" shineColor="#ffffff" className="hero-badge" disabled={false} />
 
   import DecryptedText from '../bits/DecryptedText';
   // Scramble → reveal on scroll. Perfect for tech/finance/security section headings.
@@ -1180,15 +1271,15 @@ INTERACTIVE CARDS — replace plain <div className="feat-card"> with SpotlightCa
     </SpotlightCard>
   </FadeIn>
 
-MANDATORY RULES (violations = broken output):
-✓ ALWAYS use BlurText OR a heading with GradientText inline for the hero <h1>
-✓ ALWAYS add Particles OR Aurora to the hero section background
-✓ ALWAYS wrap feature/stat/testimonial cards in <FadeIn> with staggered delay
-✓ ALWAYS use SpotlightCard instead of plain divs for feature/pricing/testimonial cards
+USAGE RULES (profile-based, not mandatory):
+✓ HIGH-MOTION profile: use ReactBits intentionally (hero text + background + staggered card reveal)
+✓ LOW-MOTION profile: plain semantic headings/cards are preferred; ReactBits should be sparse or omitted
+✓ SpotlightCard is optional; use it only when it supports the chosen visual direction
 ✓ hero-content div: position: relative; z-index: 1 (renders above WebGL canvas)
 ✓ Never import bits components in Layout.jsx — only in Hero, Features, Stats, etc.
 ✓ GradientText wraps INLINE text inside <h1>/<h2> — it is a <span>, not a block
-✓ SpotlightCard is the outer wrapper — pass className (e.g. "feat-card") directly to it
+✓ When SpotlightCard is used, it is the outer wrapper — pass className (e.g. "feat-card") directly to it
+✓ On light backgrounds, badge text should be plain/solid — avoid shiny transparent text fills
 
 ═══ JSX VALIDITY (critical) ═══
 - Return ONLY raw file. No markdown fences. First char = first char of file.
@@ -1206,6 +1297,8 @@ const CSS_SYSTEM = `You are a world-class CSS designer creating premium, agency-
 4. Every interactive element: :hover + transition (150-200ms cubic-bezier(0.4,0,0.2,1))
 5. Every section: @media (max-width: 768px) + @media (max-width: 480px)
 6. Spacing: 8px grid — use 8, 16, 24, 32, 48, 64, 80, 96px directly
+7. Prioritize simple, predictable layout rules over complex visual tricks
+8. The CSS must produce a clean, working site on desktop, tablet, and mobile without overflow or overlap bugs
 
 ═══ PREMIUM QUALITY ═══
 - Headings: letter-spacing: -0.02em to -0.04em, font-weight: 700-900
@@ -1216,11 +1309,16 @@ const CSS_SYSTEM = `You are a world-class CSS designer creating premium, agency-
 - Gradient text on hero headings: background: var(--gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent
 - Scroll animations: use @keyframes fadeUp { from { opacity:0; transform:translateY(24px) } to { opacity:1; transform:none } }
 - Decorative elements: ::before / ::after pseudo-elements for background accents, never extra DOM nodes
+- Use restraint: one strong idea per section is enough
+- Prefer grid/flex layouts that degrade gracefully
+- A simple well-spaced layout is better than an ambitious but brittle one
 
 ═══ REACTBITS COMPATIBILITY ═══
 - hero-section: must have position:relative + overflow:hidden (Particles/Aurora are position:absolute inside)
 - hero-content: position:relative; z-index:1 (so text renders above WebGL canvas)
 - .hero-heading used by BlurText — style as display:block; font-size; font-weight; color ONLY (motion handles animation)
+- BlurText / DecryptedText classes must NEVER use background-clip:text or -webkit-text-fill-color:transparent
+- If a heading uses BlurText on a light background, it MUST stay solid var(--text) or another high-contrast solid color
 - .hero-badge used by ShinyText — style the container span: font-size, letter-spacing, padding (do NOT set color or background — motion handles the gradient)
 - FadeIn wraps cards — the outer div gets opacity/transform via inline style, so only set layout CSS (width, padding, margin) on .feat-card, not animation CSS
 - Do NOT add fadeUp animations to elements wrapped in FadeIn or BlurText — they animate themselves
@@ -1231,12 +1329,19 @@ const CSS_SYSTEM = `You are a world-class CSS designer creating premium, agency-
 - Every section (hero, features, stats, testimonials, CTA) must be width:100% with no max-width on the section itself
 - Use a .container div INSIDE sections for content centering: max-width:var(--container); margin:0 auto; padding:0 24px
 - layout-main has NO max-width and NO padding — full-width is mandatory
+- Prefer normal document flow for core layout; use absolute positioning only for non-essential decoration
+- Do not create horizontal overflow
+- Do not depend on fixed heights unless absolutely necessary
+- Ensure cards and columns stack cleanly below tablet widths
 
 ═══ ANTI-PATTERNS ═══
 - No gray-on-gray (≥4.5:1 contrast always)
 - No @import statements (fonts loaded via global.css)
 - No flat same-color sections back to back
 - Never set display:block on a class used as className prop in DecryptedText/BlurText/ShinyText/GradientText animated components
+- No giant blur shapes covering content
+- No decorative elements that require magic numbers to align the main layout
+- No broken edge-to-edge sections with clipped content or unreadable text
 
 Return ONLY raw CSS. First char = first char of CSS. No markdown fences.`;
 
@@ -1315,6 +1420,10 @@ Return ONLY raw CSS. Start with the first selector. No markdown fences.`;
     return clean(raw);
   }, ai, onLog, 'generate-css').catch(() => '');
 
+  if (css) {
+    css = stripAnimatedTextTransparency(css, jsx);
+  }
+
   // Return JSX with embedded style block so extractInlineCssToGlobal can hoist it
   if (css && css.length > 50) {
     // Inject CSS as <style> block as first child of return()
@@ -1345,6 +1454,29 @@ function injectStyleBlock(jsx, css) {
     if (!match.includes('</>')) return `\n    </>\n  );\n}`;
     return match;
   });
+}
+
+function stripAnimatedTextTransparency(css, jsx) {
+  const animatedClassNames = new Set();
+
+  for (const match of jsx.matchAll(/(?:BlurText|DecryptedText)[^>]*className=["']([^"']+)["']/g)) {
+    match[1].split(/\s+/).filter(Boolean).forEach((name) => animatedClassNames.add(name));
+  }
+
+  if (animatedClassNames.size === 0) return css;
+
+  let fixed = css;
+  for (const className of animatedClassNames) {
+    const selector = className.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    fixed = fixed.replace(new RegExp(`(\\.${selector}\\s*\\{[^}]*)background\\s*:\\s*[^;]+;?`, 'g'), '$1');
+    fixed = fixed.replace(new RegExp(`(\\.${selector}\\s*\\{[^}]*)background-image\\s*:\\s*[^;]+;?`, 'g'), '$1');
+    fixed = fixed.replace(new RegExp(`(\\.${selector}\\s*\\{[^}]*)background-clip\\s*:\\s*text\\s*;?`, 'g'), '$1');
+    fixed = fixed.replace(new RegExp(`(\\.${selector}\\s*\\{[^}]*)-webkit-background-clip\\s*:\\s*text\\s*;?`, 'g'), '$1');
+    fixed = fixed.replace(new RegExp(`(\\.${selector}\\s*\\{[^}]*)-webkit-text-fill-color\\s*:\\s*transparent\\s*;?`, 'g'), '$1');
+  }
+
+  return fixed;
 }
 
 // ─── JSX tag balance auto-fixer ──────────────────────────────────────────────
