@@ -1,5 +1,8 @@
 const UNSPLASH_API_BASE = 'https://api.unsplash.com';
 
+const LEGAL_KEYWORDS = ['law', 'legal', 'attorney', 'advocate', 'counsel', 'litigation', 'firm', 'corporate law', 'compliance'];
+const BAD_IMAGE_TERMS = ['sign', 'text', 'letter', 'letters', 'typography', 'logo', 'neon sign', 'word', 'words', 'ok', 'symbol', 'icon'];
+
 function isEnabled() {
   return Boolean(String(process.env.UNSPLASH_ACCESS_KEY || '').trim());
 }
@@ -9,6 +12,46 @@ function buildReferralUrl(url) {
   const joiner = url.includes('?') ? '&' : '?';
   const source = encodeURIComponent(process.env.UNSPLASH_APP_NAME || 'websight');
   return `${url}${joiner}utm_source=${source}&utm_medium=referral`;
+}
+
+function isLegalContext(siteData = {}, tokens = {}) {
+  const haystack = [
+    siteData.title,
+    siteData.description,
+    tokens.brandName,
+    tokens.targetAudience,
+    tokens.siteType,
+    ...(siteData.headings || []).map((h) => typeof h === 'string' ? h : h?.text),
+  ].filter(Boolean).join(' ').toLowerCase();
+
+  return LEGAL_KEYWORDS.some((term) => haystack.includes(term));
+}
+
+function scorePhotoRelevance(photo, query = '', legalContext = false) {
+  const text = [
+    photo.alt,
+    photo.description,
+    query,
+  ].filter(Boolean).join(' ').toLowerCase();
+
+  let score = 0;
+
+  if (legalContext) {
+    if (/(law|legal|lawyer|attorney|counsel|court|justice|boardroom|meeting|office|professional)/.test(text)) score += 4;
+    if (/(sign|text|letter|letters|typography|logo|symbol|icon|neon)/.test(text)) score -= 8;
+  }
+
+  if (/(office|meeting|boardroom|team|workspace|professional|corporate|architecture|building|conference)/.test(text)) score += 2;
+  if (/(sign|text|letter|letters|typography|logo|symbol|icon|neon)/.test(text)) score -= 6;
+  if (/\bok\b/.test(text)) score -= 10;
+
+  return score;
+}
+
+function isUsablePhoto(photo, query = '', legalContext = false) {
+  const text = [photo.alt, photo.description, query].filter(Boolean).join(' ').toLowerCase();
+  if (BAD_IMAGE_TERMS.some((term) => text.includes(term))) return false;
+  return scorePhotoRelevance(photo, query, legalContext) >= (legalContext ? 1 : -1);
 }
 
 function normalizePhoto(photo) {
@@ -110,6 +153,7 @@ function buildImageQueries(siteData = {}, tokens = {}) {
   const audience = tokens.targetAudience || '';
   const title = siteData.title || tokens.brandName || '';
   const headings = (siteData.headings || []).slice(0, 3).map((h) => String(h).trim()).filter(Boolean);
+  const legalContext = isLegalContext(siteData, tokens);
 
   if (title) base.push(`${title} ${siteType}`.trim());
   if (audience) base.push(`${audience} ${siteType}`.trim());
@@ -118,6 +162,7 @@ function buildImageQueries(siteData = {}, tokens = {}) {
   const fallbackByType = {
     saas: ['software team collaboration', 'developer workspace', 'modern office technology'],
     corporate: ['corporate boardroom', 'business meeting', 'professional office'],
+    legal: ['law firm office', 'lawyer meeting client', 'corporate law boardroom', 'legal consultation office', 'professional law firm interior'],
     agency: ['creative team studio', 'design workshop', 'brand presentation'],
     'e-commerce': ['premium product photography', 'shopping experience', 'modern retail'],
     portfolio: ['creative workspace', 'designer desk setup', 'art direction studio'],
@@ -125,7 +170,17 @@ function buildImageQueries(siteData = {}, tokens = {}) {
     other: ['professional workspace', 'modern architecture', 'team collaboration'],
   };
 
-  base.push(...(fallbackByType[siteType] || fallbackByType.other));
+  if (legalContext) {
+    base.unshift(
+      `${tokens.brandName || title} law firm office`.trim(),
+      'law firm office interior',
+      'lawyer meeting client',
+      'corporate legal team meeting',
+      'legal consultation office'
+    );
+  }
+
+  base.push(...(fallbackByType[legalContext ? 'legal' : siteType] || fallbackByType.other));
 
   return [...new Set(base.map((q) => q.replace(/\s+/g, ' ').trim()).filter(Boolean))].slice(0, 5);
 }
@@ -134,13 +189,17 @@ async function getImageLibrary(siteData = {}, tokens = {}) {
   if (!isEnabled()) return { queries: [], photos: [], promptBlock: '' };
 
   const queries = buildImageQueries(siteData, tokens);
+  const legalContext = isLegalContext(siteData, tokens);
   const photos = [];
   const seen = new Set();
 
   for (const query of queries) {
     try {
-      const result = await searchPhotos(query, { perPage: 3 });
-      for (const photo of result.results) {
+      const result = await searchPhotos(query, { perPage: 6 });
+      const filtered = result.results
+        .filter((photo) => isUsablePhoto(photo, query, legalContext))
+        .sort((a, b) => scorePhotoRelevance(b, query, legalContext) - scorePhotoRelevance(a, query, legalContext));
+      for (const photo of filtered) {
         if (seen.has(photo.id)) continue;
         seen.add(photo.id);
         photos.push(photo);
