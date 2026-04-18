@@ -36,18 +36,18 @@ router.get('/overview', async (req, res) => {
       db.query(
         `SELECT
            visitor_id,
-           MIN(created_at) AS first_seen_at,
-           MAX(created_at) AS last_seen_at,
+           MIN(ve.created_at) AS first_seen_at,
+           MAX(ve.created_at) AS last_seen_at,
            COUNT(*) AS visit_count,
-           MAX(path) AS latest_path,
-           MAX(referrer) AS latest_referrer,
-           MAX(user_agent) AS latest_user_agent,
+           MAX(ve.path) AS latest_path,
+           MAX(ve.referrer) AS latest_referrer,
+           MAX(ve.user_agent) AS latest_user_agent,
            MAX(u.email) AS linked_email,
            MAX(u.name) AS linked_name
          FROM visitor_events ve
          LEFT JOIN users u ON u.id = ve.user_id
          GROUP BY visitor_id
-         ORDER BY MAX(created_at) DESC
+         ORDER BY MAX(ve.created_at) DESC
          LIMIT 25`
       ),
       db.query(
