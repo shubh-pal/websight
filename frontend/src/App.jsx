@@ -8,6 +8,9 @@ import Dashboard from './pages/Dashboard';
 import Settings from './pages/Settings';
 import Admin from './pages/Admin';
 import AdminLogin from './pages/AdminLogin';
+import AdminUsers from './pages/AdminUsers';
+import AdminWebsites from './pages/AdminWebsites';
+import AdminContacts from './pages/AdminContacts';
 
 import ProtectedRoute from './components/ProtectedRoute';
 import AdminProtectedRoute from './components/AdminProtectedRoute';
@@ -23,14 +26,15 @@ function getVisitorId() {
 
 export default function App() {
   const location = useLocation();
+  const gaMeasurementId = 'G-JYWH1C2KFJ';
 
   useEffect(() => {
     if (window.gtag) {
-      window.gtag('config', 'G-XXXXXXXXXX', {
+      window.gtag('config', gaMeasurementId, {
         page_path: location.pathname + location.search,
       });
     }
-  }, [location]);
+  }, [gaMeasurementId, location]);
 
   useEffect(() => {
     const visitorId = getVisitorId();
@@ -59,6 +63,11 @@ export default function App() {
         <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
         <Route path="/admin/login" element={<AdminLogin />} />
         <Route path="/admin" element={<AdminProtectedRoute><Admin /></AdminProtectedRoute>} />
+        <Route path="/admin/dashboard" element={<AdminProtectedRoute><Admin /></AdminProtectedRoute>} />
+        <Route path="/admin/users" element={<AdminProtectedRoute><AdminUsers /></AdminProtectedRoute>} />
+        <Route path="/admin/websites" element={<AdminProtectedRoute><AdminWebsites /></AdminProtectedRoute>} />
+        <Route path="/admin/websites/:jobId" element={<AdminProtectedRoute><Result /></AdminProtectedRoute>} />
+        <Route path="/admin/contacts" element={<AdminProtectedRoute><AdminContacts /></AdminProtectedRoute>} />
       </Routes>
     </AuthProvider>
   );
