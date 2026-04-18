@@ -9,6 +9,8 @@ const { exec } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const puppeteer = require('puppeteer');
+const { loadFilesFromDisk, getJobSync } = require('./jobStore');
+const { buildProject: writeProjectFiles } = require('./projectBuilder');
 
 const PROJECTS_DIR = path.join(__dirname, '../../storage/projects');
 const APP_URL = process.env.APP_URL || 'localhost:3001';
@@ -65,9 +67,26 @@ function isBuilt(jobId) {
  * Build the project (npm install + npm run build).
  * Resolves with the dist directory path.
  */
-function buildProject(jobId) {
+async function ensureProjectDir(jobId) {
   const dir = path.join(PROJECTS_DIR, jobId);
-  if (!fs.existsSync(dir)) return Promise.reject(new Error('Project directory not found'));
+  if (fs.existsSync(dir)) return dir;
+
+  const files = await Promise.resolve(loadFilesFromDisk(jobId));
+  if (!files) {
+    throw new Error('Project files not found');
+  }
+
+  const job = getJobSync(jobId) || {};
+  await writeProjectFiles(jobId, files, job.projectName || jobId.slice(0, 8));
+  return dir;
+}
+
+/**
+ * Build the project (npm install + npm run build).
+ * Resolves with the dist directory path.
+ */
+async function buildProject(jobId) {
+  const dir = await ensureProjectDir(jobId);
 
   return new Promise((resolve, reject) => {
     console.log(`[publish] Building ${jobId}…`);
