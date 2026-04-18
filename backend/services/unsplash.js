@@ -147,13 +147,15 @@ async function trackDownload(downloadLocation) {
   return res.ok;
 }
 
-function buildImageQueries(siteData = {}, tokens = {}) {
+function buildImageQueries(siteData = {}, tokens = {}, preferredQueries = []) {
   const base = [];
   const siteType = tokens.siteType || 'business';
   const audience = tokens.targetAudience || '';
   const title = siteData.title || tokens.brandName || '';
   const headings = (siteData.headings || []).slice(0, 3).map((h) => String(h).trim()).filter(Boolean);
   const legalContext = isLegalContext(siteData, tokens);
+
+  base.push(...(preferredQueries || []).map((q) => String(q || '').trim()).filter(Boolean));
 
   if (title) base.push(`${title} ${siteType}`.trim());
   if (audience) base.push(`${audience} ${siteType}`.trim());
@@ -185,10 +187,10 @@ function buildImageQueries(siteData = {}, tokens = {}) {
   return [...new Set(base.map((q) => q.replace(/\s+/g, ' ').trim()).filter(Boolean))].slice(0, 5);
 }
 
-async function getImageLibrary(siteData = {}, tokens = {}) {
+async function getImageLibrary(siteData = {}, tokens = {}, preferredQueries = []) {
   if (!isEnabled()) return { queries: [], photos: [], promptBlock: '' };
 
-  const queries = buildImageQueries(siteData, tokens);
+  const queries = buildImageQueries(siteData, tokens, preferredQueries);
   const legalContext = isLegalContext(siteData, tokens);
   const photos = [];
   const seen = new Set();

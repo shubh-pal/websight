@@ -75,8 +75,14 @@ async function generateRedesign(siteData, framework = 'react', onProgress = () =
     : await generateScenePlan(tokens, creativeDirection, ai, (msg) => onProgress(3, msg), profile);
   onProgress(3, `Scenes — ${(scenePlan.scenes || []).map(s => s.name).join(' → ')}`);
 
+  onProgress(3, 'Planning image search queries…');
+  const imageQueries = await generateImageSearchQueries(siteData, tokens, ai, profile);
+  if (imageQueries.length) {
+    onProgress(3, `Image queries — ${imageQueries.join(' · ')}`);
+  }
+
   onProgress(3, 'Finding image references…');
-  const imageLibrary = await getImageLibrary(siteData, tokens);
+  const imageLibrary = await getImageLibrary(siteData, tokens, imageQueries);
   if (imageLibrary.photos?.length) {
     onProgress(3, `Found ${imageLibrary.photos.length} Unsplash image candidates`);
   }
@@ -178,6 +184,43 @@ async function generateRedesign(siteData, framework = 'react', onProgress = () =
   }
 
   return { tokens, creativeDirection, scenePlan, evaluation, files };
+}
+
+async function generateImageSearchQueries(siteData, tokens, ai, profile = {}) {
+  const system = `You generate precise Unsplash search queries for website redesigns.
+Return ONLY valid JSON with this shape: {"queries":["..."]}.
+
+Rules:
+- Produce 4 to 6 short search queries.
+- Queries must be domain-aware and visually descriptive.
+- Prefer environments, people, spaces, and professional scenarios over abstract words.
+- Avoid brand names unless they are generic enough to help.
+- Avoid queries likely to return signs, logos, typography, icons, illustrations, or unrelated objects.
+- For law/legal/professional-services sites, prefer phrases like office, consultation, boardroom, meeting, legal team, professional interior.
+- Do not include punctuation-heavy phrases.`;
+
+  const user = `Generate Unsplash search queries for this website redesign.
+
+Brand: ${tokens.brandName || siteData.title || 'Unknown'}
+Site type: ${tokens.siteType || 'other'}
+Audience: ${tokens.targetAudience || ''}
+Description: ${siteData.description || ''}
+Title: ${siteData.title || ''}
+Headings: ${JSON.stringify((siteData.headings || []).slice(0, profile.compactHome ? 4 : 8))}
+Creative direction: ${tokens.styleArchetype || ''} / ${tokens.brandPersonality || ''} / ${tokens.toneOfVoice || ''}
+
+Return only JSON.`;
+
+  try {
+    const raw = await ai.complete(system, user, 500, { isJson: true });
+    const parsed = JSON.parse(raw);
+    return [...new Set((parsed.queries || [])
+      .map((q) => String(q || '').trim())
+      .filter(Boolean))]
+      .slice(0, 6);
+  } catch (_) {
+    return [];
+  }
 }
 
 // ─── Step 1: Design Tokens ────────────────────────────────────────────────────
