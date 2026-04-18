@@ -1,7 +1,7 @@
 const UNSPLASH_API_BASE = 'https://api.unsplash.com';
 
 function isEnabled() {
-  return Boolean(process.env.UNSPLASH_ACCESS_KEY);
+  return Boolean(String(process.env.UNSPLASH_ACCESS_KEY || '').trim());
 }
 
 function buildReferralUrl(url) {
@@ -42,7 +42,7 @@ function normalizePhoto(photo) {
 }
 
 async function unsplashFetch(pathname, params = {}) {
-  const accessKey = process.env.UNSPLASH_ACCESS_KEY;
+  const accessKey = String(process.env.UNSPLASH_ACCESS_KEY || '').trim();
   if (!accessKey) throw new Error('UNSPLASH_ACCESS_KEY is not set');
 
   const url = new URL(`${UNSPLASH_API_BASE}${pathname}`);
@@ -59,6 +59,9 @@ async function unsplashFetch(pathname, params = {}) {
 
   if (!res.ok) {
     const body = await res.text().catch(() => '');
+    if (res.status === 401) {
+      throw new Error(`Unsplash API error 401: invalid or inactive access key (${body || res.statusText})`);
+    }
     throw new Error(`Unsplash API error ${res.status}: ${body || res.statusText}`);
   }
 
@@ -151,11 +154,23 @@ async function getImageLibrary(siteData = {}, tokens = {}) {
 
   if (photos.length === 0) return { queries, photos, promptBlock: '' };
 
+  const primaryPhoto = photos[0];
+
   const promptBlock = `
 UNSPLASH IMAGES AVAILABLE:
-- You MAY use these exact hotlinked image URLs in <img> tags or CSS backgrounds.
-- If you use one, include visible attribution text nearby using the provided photographer + Unsplash links.
-- Prefer 1-2 images total. Only use them where they materially improve the layout.
+- You MUST use at least 1 of these exact Unsplash image URLs in the generated site.
+- Prefer placing the PRIMARY image in the Hero or first major section.
+- You MAY use at most 2 images total.
+- Use ONLY the provided URLs. Never invent image URLs.
+- If you use an image, include visible attribution text nearby using the provided photographer + Unsplash links.
+- If you use an image as a CSS background, still render a visible attribution caption below or beside that image area.
+
+PRIMARY HERO IMAGE RECOMMENDATION:
+- image: ${primaryPhoto.urls.regular}
+- alt: ${primaryPhoto.alt}
+- attributionText: ${primaryPhoto.attribution}
+- photographerLink: ${primaryPhoto.user.profile}
+- unsplashLink: ${primaryPhoto.links.html}
 
 ${photos.map((photo, index) => (
 `${index + 1}. "${photo.alt}"

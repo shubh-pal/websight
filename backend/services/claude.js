@@ -630,6 +630,7 @@ async function generateComponents(tokens, creativeDirection, scenePlan, siteData
   const tokenCtx = buildTokenContext(tokens, creativeDirection, profile);
   const siteCtx  = buildSiteContext(siteData, profile);
   const navJson  = JSON.stringify((tokens.navLinks || []).slice(0, 5));
+  const hasUnsplashImages = Boolean(imageLibraryBlock && imageLibraryBlock.trim());
 
   // Extract per-component scene from scene plan (with fallbacks from componentStrategy)
   const heroScene  = getSceneForComponent('Hero',         scenePlan);
@@ -798,6 +799,12 @@ IMPLEMENTATION GUARDRAILS:
 - Do not rely on complex absolute positioning for core content layout
 - Decorative background elements must never overlap or hide important text/buttons
 - Mobile layout must stack cleanly with comfortable spacing and readable type
+${hasUnsplashImages ? `
+UNSPLASH IMAGE REQUIREMENT:
+- This Hero MUST visibly use the PRIMARY HERO IMAGE RECOMMENDATION from the Unsplash block above.
+- Use it as a large <img> or as the dominant visual panel/background for the hero.
+- Add a small visible attribution caption directly below or beside the image area.
+- Do not produce a text-only hero when Unsplash images are available.` : ''}
 
 HERO MOOD: ${creativeDirection.heroMood || `Premium ${archetype} feel — ${tokens.brandPersonality} and ${toneOfVoice}`}
 
@@ -842,6 +849,9 @@ STRUCTURE RULES:
 - Apply the visual motif "${visualMotif}" as a restrained recurring accent
 - TWIST TO IMPLEMENT: "${featScene?.twist || 'One dominant feature card'}"
 - Keep card structure simple and robust — avoid layouts that are likely to collapse responsively
+${hasUnsplashImages ? `
+- Because Unsplash images are available, at least one feature block or supporting visual in this section MUST use one provided Unsplash image if Hero does not already consume all imagery.
+- Any used image must include a visible attribution caption.` : ''}
 
 LAYOUT: "${featLayout}" — implement this layout type precisely:
 ${featLayout === '3-col-grid'        ? '- 3-column equal grid → 2-col tablet → 1-col mobile. Uniform card heights. But: first card spans 2 columns or is visually elevated.' : ''}
@@ -1074,6 +1084,7 @@ async function generatePages(tokens, creativeDirection, scenePlan, components, s
   const isReact = framework === 'react';
   const ext     = isReact ? 'jsx' : 'ts';
   const pageDir = isReact ? 'src/pages' : 'src/app/pages';
+  const hasUnsplashImages = Boolean(imageLibraryBlock && imageLibraryBlock.trim());
 
   // Build list of available components
   const compNames = Object.keys(components)
@@ -1157,6 +1168,7 @@ CRITICAL STYLING RULES:
 - Every section must be clearly separated, aligned to a consistent container, and work at tablet/mobile widths
 - The final page must render as a basic working website even if animations or decorative details are removed
 ${profile.compactHome ? '- DO NOT add extra bespoke sections beyond the imported components. Keep the page compact.' : ''}
+${hasUnsplashImages ? '- Unsplash images are available for this job. The final homepage MUST contain at least one visible Unsplash image with visible attribution; do not return a text-only page.' : ''}
 
 REQUIRED IMPORTS:
 import Layout from '../components/Layout';

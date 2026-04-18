@@ -15,7 +15,8 @@ router.get('/search', async (req, res) => {
     res.json(result);
   } catch (err) {
     console.error('[images/search] error:', err.message);
-    res.status(500).json({ error: 'Failed to search images' });
+    const status = String(err.message || '').includes('401') ? 401 : 500;
+    res.status(status).json({ error: err.message || 'Failed to search images' });
   }
 });
 
