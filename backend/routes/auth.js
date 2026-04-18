@@ -8,6 +8,27 @@ const requireAuth = require('../middleware/requireAuth');
 const { encrypt, decrypt, getHint } = require('../services/keyEncryption');
 
 const router = express.Router();
+const ADMIN_EMAILS = new Set(
+  (process.env.ADMIN_EMAILS || 'shubhpalan@gmail.com')
+    .split(',')
+    .map(email => email.trim().toLowerCase())
+    .filter(Boolean)
+);
+
+function isAdminEmail(email) {
+  return !!email && ADMIN_EMAILS.has(String(email).trim().toLowerCase());
+}
+
+function toClientUser(user) {
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    avatarUrl: user.avatar_url,
+    plan: user.plan,
+    isAdmin: !!user.is_admin,
+  };
+}
 
 // Configure Passport Google Strategy
 passport.use(new GoogleStrategy({
@@ -38,30 +59,35 @@ passport.use(new GoogleStrategy({
             user.google_id = googleId;
             user.avatar_url = avatarUrl;
           }
+          if (isAdminEmail(email) && !user.is_admin) {
+            await db.query('UPDATE users SET is_admin = TRUE WHERE id = $1', [user.id]);
+            user.is_admin = true;
+          }
           return done(null, user);
         }
 
         const result = await db.query(
-          `INSERT INTO users (google_id, email, name, avatar_url, plan)
-           VALUES ($1, $2, $3, $4, 'free')
+          `INSERT INTO users (google_id, email, name, avatar_url, plan, is_admin)
+           VALUES ($1, $2, $3, $4, 'free', $5)
            ON CONFLICT (google_id) DO UPDATE SET
              email = EXCLUDED.email,
              name = EXCLUDED.name,
-             avatar_url = EXCLUDED.avatar_url
-           RETURNING id, google_id, email, name, avatar_url, plan`,
-          [googleId, email, name, avatarUrl]
+             avatar_url = EXCLUDED.avatar_url,
+             is_admin = EXCLUDED.is_admin
+           RETURNING id, google_id, email, name, avatar_url, plan, is_admin`,
+          [googleId, email, name, avatarUrl, isAdminEmail(email)]
         );
         const user = result.rows[0];
         return done(null, user);
       } catch (err) {
         console.error('[auth] Database error upserting user:', err.message);
         // Fall back to session-only storage
-        const user = { id: googleId, google_id: googleId, email, name, avatar_url: avatarUrl, plan: 'free' };
+        const user = { id: googleId, google_id: googleId, email, name, avatar_url: avatarUrl, plan: 'free', is_admin: isAdminEmail(email) };
         return done(null, user);
       }
     } else {
       // No database – store in session only
-      const user = { id: googleId, google_id: googleId, email, name, avatar_url: avatarUrl, plan: 'free' };
+      const user = { id: googleId, google_id: googleId, email, name, avatar_url: avatarUrl, plan: 'free', is_admin: isAdminEmail(email) };
       return done(null, user);
     }
   } catch (err) {
@@ -112,7 +138,7 @@ passport.deserializeUser(async (id, done) => {
     if (db.pool) {
       try {
         const result = await db.query(
-          'SELECT id, google_id, email, name, avatar_url, plan FROM users WHERE id = $1',
+          'SELECT id, google_id, email, name, avatar_url, plan, is_admin FROM users WHERE id = $1',
           [id]
         );
         if (result.rows.length > 0) {
@@ -181,8 +207,8 @@ router.post('/signup', async (req, res) => {
     const hash = await bcrypt.hash(password, salt);
 
     const result = await db.query(
-      'INSERT INTO users (email, password_hash, name, plan) VALUES ($1, $2, $3, $4) RETURNING id, email, name, plan',
-      [email, hash, name || email.split('@')[0], 'free']
+      'INSERT INTO users (email, password_hash, name, plan, is_admin) VALUES ($1, $2, $3, $4, $5) RETURNING id, email, name, plan, is_admin',
+      [email, hash, name || email.split('@')[0], 'free', isAdminEmail(email)]
     );
 
     res.json({ message: 'Signup successful! Please log in.' });
@@ -200,13 +226,7 @@ router.post('/login', (req, res, next) => {
 
     req.logIn(user, (err) => {
       if (err) return res.status(500).json({ error: 'Login failed' });
-      return res.json({
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        avatarUrl: user.avatar_url,
-        plan: user.plan
-      });
+      return res.json(toClientUser(user));
     });
   })(req, res, next);
 });
@@ -214,14 +234,7 @@ router.post('/login', (req, res, next) => {
 // GET /auth/me – Return current user
 router.get('/me', (req, res) => {
   if (req.isAuthenticated && req.isAuthenticated()) {
-    const user = req.user;
-    return res.json({
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      avatarUrl: user.avatar_url,
-      plan: user.plan
-    });
+    return res.json(toClientUser(req.user));
   }
   res.status(401).json({ error: 'Not authenticated' });
 });

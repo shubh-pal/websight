@@ -15,6 +15,8 @@ const jobsRouter = require('./routes/jobs');
 const publishRouter = require('./routes/publish');
 const contactRouter = require('./routes/contact');
 const waitlistRouter = require('./routes/waitlist');
+const analyticsRouter = require('./routes/analytics');
+const adminRouter = require('./routes/admin');
 const { findJobIdBySubdomain, getDistDir, registerSubdomain } = require('./services/publisher');
 const path = require('path');
 const fs = require('fs');
@@ -153,6 +155,8 @@ app.use('/api/jobs', jobsRouter);
 app.use('/api/jobs', publishRouter);
 app.use('/api/contact', contactRouter);
 app.use('/api/waitlist', waitlistRouter);
+app.use('/api/analytics', analyticsRouter);
+app.use('/api/admin', adminRouter);
 
 // Health check endpoint
 app.get('/api/health', (_, res) => res.json({ status: 'ok', version: '1.0.0' }));

@@ -85,6 +85,7 @@ export function AuthProvider({ children }) {
     login,
     signup,
     loginUrl: '/auth/google',
+    refreshUser: checkSession,
   };
 
   return (

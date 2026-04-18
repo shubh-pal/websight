@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS users (
   name TEXT,
   avatar_url TEXT,
   plan TEXT NOT NULL DEFAULT 'free',
+  is_admin BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -63,3 +64,31 @@ CREATE TABLE IF NOT EXISTS api_keys (
   updated_at TIMESTAMPTZ DEFAULT NOW(),
   PRIMARY KEY (user_id, provider)
 );
+
+-- Visitor event tracking for admin analytics
+CREATE TABLE IF NOT EXISTS visitor_events (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  visitor_id TEXT NOT NULL,
+  user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  path TEXT NOT NULL,
+  referrer TEXT,
+  user_agent TEXT,
+  ip_hash TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS visitor_events_visitor_id_idx ON visitor_events(visitor_id);
+CREATE INDEX IF NOT EXISTS visitor_events_created_at_idx ON visitor_events(created_at DESC);
+CREATE INDEX IF NOT EXISTS visitor_events_user_id_idx ON visitor_events(user_id);
+
+CREATE TABLE IF NOT EXISTS contact_submissions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  email TEXT NOT NULL,
+  message TEXT NOT NULL,
+  ip TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_contact_email ON contact_submissions (email);
+CREATE INDEX IF NOT EXISTS idx_contact_created_at ON contact_submissions (created_at DESC);
