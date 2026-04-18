@@ -48,6 +48,7 @@ export default function Result() {
 
   const logsEndRef = useRef(null);
   const sseRef     = useRef(null);
+  const publishPollRef = useRef(null);
 
   // ── Load full file map ─────────────────────────────────────────────────────
   const loadFiles = useCallback(async () => {
@@ -120,6 +121,10 @@ export default function Result() {
     logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [logs]);
 
+  useEffect(() => () => {
+    if (publishPollRef.current) clearInterval(publishPollRef.current);
+  }, []);
+
 
 
   async function handleApplyEdit(command) {
@@ -137,6 +142,10 @@ export default function Result() {
   async function handlePublish(force = false) {
     if (publish.status === 'building') return;
     try {
+      if (publishPollRef.current) {
+        clearInterval(publishPollRef.current);
+        publishPollRef.current = null;
+      }
       setPublish(p => ({ ...p, status: 'building', error: null }));
       const url = `/api/jobs/${jobId}/publish${force ? '?force=true' : ''}`;
       const res = await fetch(url, { method: 'POST' });
@@ -149,18 +158,45 @@ export default function Result() {
       }
       setPublish({ status: 'building', url: data.url, error: null });
       // Poll for completion
-      const poll = setInterval(async () => {
+      let nullCount = 0;
+      publishPollRef.current = setInterval(async () => {
         try {
           const r = await fetch(`/api/jobs/${jobId}/publish-status`);
           const d = await r.json();
           if (d.publishStatus === 'live') {
             setPublish({ status: 'live', url: d.url, error: null });
-            clearInterval(poll);
+            clearInterval(publishPollRef.current);
+            publishPollRef.current = null;
           } else if (d.publishStatus === 'error') {
             setPublish({ status: 'error', url: null, error: d.publishError });
-            clearInterval(poll);
+            clearInterval(publishPollRef.current);
+            publishPollRef.current = null;
+          } else if (!d.publishStatus) {
+            nullCount += 1;
+            if (nullCount >= 3) {
+              setPublish({
+                status: 'error',
+                url: null,
+                error: 'Publish state was lost. Please retry publish.',
+              });
+              clearInterval(publishPollRef.current);
+              publishPollRef.current = null;
+            }
+          } else {
+            nullCount = 0;
           }
-        } catch (_) {}
+        } catch (_) {
+          nullCount += 1;
+          if (nullCount >= 3) {
+            setPublish({
+              status: 'error',
+              url: null,
+              error: 'Could not confirm publish status. Please retry publish.',
+            });
+            clearInterval(publishPollRef.current);
+            publishPollRef.current = null;
+          }
+        }
       }, 3000);
     } catch (err) {
       setPublish({ status: 'error', url: null, error: err.message });

@@ -22,6 +22,10 @@ CREATE TABLE IF NOT EXISTS jobs (
   tokens JSONB,
   file_map JSONB,
   error TEXT,
+  publish_status TEXT,
+  published_subdomain TEXT,
+  publish_error TEXT,
+  redesign_screenshot TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );

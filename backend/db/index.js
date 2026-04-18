@@ -49,6 +49,11 @@ async function ensureSchema() {
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_contact_email ON contact_submissions (email);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_contact_created_at ON contact_submissions (created_at DESC);`);
 
+  await pool.query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS publish_status TEXT;`);
+  await pool.query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS published_subdomain TEXT;`);
+  await pool.query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS publish_error TEXT;`);
+  await pool.query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS redesign_screenshot TEXT;`);
+
   const adminEmails = (process.env.ADMIN_EMAILS || 'shubhpalan@gmail.com')
     .split(',')
     .map(email => email.trim().toLowerCase())

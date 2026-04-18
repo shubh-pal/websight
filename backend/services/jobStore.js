@@ -148,6 +148,10 @@ function createJob(id, data = {}) {
     url: data.url || null,
     framework: data.framework || null,
     model: data.model || null,
+    publishStatus: data.publishStatus || null,
+    publishedSubdomain: data.publishedSubdomain || null,
+    publishError: data.publishError || null,
+    redesignScreenshot: data.redesignScreenshot || null,
   };
   jobs.set(id, job);
   saveJobs();
@@ -181,6 +185,10 @@ function updateJob(id, updates) {
     if (updates.error !== undefined) dbUpdates.error = updates.error;
     if (updates.framework !== undefined) dbUpdates.framework = updates.framework;
     if (updates.model !== undefined) dbUpdates.model = updates.model;
+    if (updates.publishStatus !== undefined) dbUpdates.publish_status = updates.publishStatus;
+    if (updates.publishedSubdomain !== undefined) dbUpdates.published_subdomain = updates.publishedSubdomain;
+    if (updates.publishError !== undefined) dbUpdates.publish_error = updates.publishError;
+    if (updates.redesignScreenshot !== undefined) dbUpdates.redesign_screenshot = updates.redesignScreenshot;
 
     if (Object.keys(dbUpdates).length > 0) {
       const setClauses = Object.keys(dbUpdates).map((key, i) => `${key} = $${i + 2}`).join(', ');
@@ -214,6 +222,10 @@ async function getJob(id) {
           projectName: row.project_name,
           tokens: row.tokens,
           error: row.error,
+          publishStatus: row.publish_status,
+          publishedSubdomain: row.published_subdomain,
+          publishError: row.publish_error,
+          redesignScreenshot: row.redesign_screenshot,
           url: row.url,
           framework: row.framework,
           model: row.model,
@@ -297,7 +309,9 @@ async function getUserJobs(userId) {
 
   try {
     const result = await db.query(
-      `SELECT id, user_id, status, project_name, url, framework, model, error, created_at, updated_at
+      `SELECT id, user_id, status, project_name, url, framework, model, error,
+              publish_status, published_subdomain, publish_error, redesign_screenshot,
+              created_at, updated_at
        FROM jobs
        WHERE user_id = $1
        ORDER BY created_at DESC`,
@@ -312,6 +326,10 @@ async function getUserJobs(userId) {
       framework: row.framework,
       model: row.model,
       error: row.error,
+      publishStatus: row.publish_status,
+      publishedSubdomain: row.published_subdomain,
+      publishError: row.publish_error,
+      redesignScreenshot: row.redesign_screenshot,
       createdAt: new Date(row.created_at).getTime(),
       updatedAt: new Date(row.updated_at).getTime(),
     }));
