@@ -7,6 +7,16 @@ async function ensureSchema() {
 
   await pool.query(`
     ALTER TABLE users
+      ALTER COLUMN google_id DROP NOT NULL;
+  `).catch(() => {});
+
+  await pool.query(`
+    ALTER TABLE users
+      ADD COLUMN IF NOT EXISTS password_hash TEXT;
+  `);
+
+  await pool.query(`
+    ALTER TABLE users
       ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE;
   `);
 

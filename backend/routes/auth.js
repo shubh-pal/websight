@@ -30,6 +30,13 @@ function toClientUser(user) {
   };
 }
 
+function getStaticAdminCredentials() {
+  return {
+    email: (process.env.ADMIN_USER || 'shubhpalan@gmail.com').trim().toLowerCase(),
+    password: process.env.ADMIN_PASSWORD || 'mrsrobotic',
+  };
+}
+
 // Configure Passport Google Strategy
 passport.use(new GoogleStrategy({
   clientID: process.env.GOOGLE_CLIENT_ID || '',
@@ -229,6 +236,45 @@ router.post('/login', (req, res, next) => {
       return res.json(toClientUser(user));
     });
   })(req, res, next);
+});
+
+// POST /auth/admin/login — static admin login via env
+router.post('/admin/login', (req, res) => {
+  const { email, password } = req.body || {};
+  const adminCreds = getStaticAdminCredentials();
+
+  if (String(email || '').trim().toLowerCase() !== adminCreds.email || String(password || '') !== adminCreds.password) {
+    return res.status(401).json({ error: 'Invalid admin credentials' });
+  }
+
+  req.session.adminAuthenticated = true;
+  req.session.adminEmail = adminCreds.email;
+
+  return res.json({
+    email: adminCreds.email,
+    authenticated: true,
+  });
+});
+
+// GET /auth/admin/me — current admin session
+router.get('/admin/me', (req, res) => {
+  if (!req.session?.adminAuthenticated) {
+    return res.status(401).json({ error: 'Admin not authenticated' });
+  }
+
+  return res.json({
+    email: req.session.adminEmail || getStaticAdminCredentials().email,
+    authenticated: true,
+  });
+});
+
+// POST /auth/admin/logout — destroy admin session only
+router.post('/admin/logout', (req, res) => {
+  if (req.session) {
+    req.session.adminAuthenticated = false;
+    delete req.session.adminEmail;
+  }
+  return res.json({ ok: true });
 });
 
 // GET /auth/me – Return current user
