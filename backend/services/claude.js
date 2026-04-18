@@ -13,6 +13,15 @@ function getGenerationProfile(model = '') {
     compactHome: isFreeTier,
     maxExtraSections: isFreeTier ? 2 : 4,
     maxScenes: isFreeTier ? 3 : 5,
+    useDeterministicHomeAssembly: isFreeTier,
+    fetchComponentReferences: !isFreeTier,
+    useHeuristicCreativeDirection: isFreeTier,
+    useHeuristicScenePlan: isFreeTier,
+    maxJsxTokens: isFreeTier ? 7000 : 24000,
+    maxCssTokens: isFreeTier ? 4500 : 8192,
+    maxRepairTokens: isFreeTier ? 4000 : 12000,
+    retryCount: isFreeTier ? 2 : 3,
+    allowContinuation: !isFreeTier,
   };
 }
 
@@ -40,10 +49,12 @@ async function generateRedesign(siteData, framework = 'react', onProgress = () =
 
   // ── Fetch component references in parallel (non-blocking) ────────────────
   const componentTypes = ['Hero', 'Features', 'Stats', 'Testimonials', 'CTA', 'Header', 'Footer'];
-  const componentRefs = await fetchAllComponentReferences(componentTypes);
+  const componentRefs = profile.fetchComponentReferences
+    ? await fetchAllComponentReferences(componentTypes)
+    : {};
 
   onProgress(1, `Analyzing brand identity… [${model}]`);
-  const tokens = await analyzeAndTokenize(siteData, ai, (msg) => onProgress(1, msg), designSystem);
+  const tokens = await analyzeAndTokenize(siteData, ai, (msg) => onProgress(1, msg), designSystem, profile);
   if (profile.compactHome) {
     const limitedComponents = chooseHomeSections(tokens.components, profile.maxExtraSections);
     tokens.components = limitedComponents;
@@ -52,18 +63,24 @@ async function generateRedesign(siteData, framework = 'react', onProgress = () =
   onProgress(1, `Brand analyzed — ${tokens.brandName} · ${tokens.styleArchetype || tokens.siteType} · ${tokens.brandPersonality || ''}`);
 
   onProgress(2, 'Generating creative direction…');
-  const creativeDirection = await generateCreativeDirection(tokens, siteData, ai, (msg) => onProgress(2, msg), diBlock);
+  const creativeDirection = profile.useHeuristicCreativeDirection
+    ? deriveCreativeDirection(tokens, siteData)
+    : await generateCreativeDirection(tokens, siteData, ai, (msg) => onProgress(2, msg), diBlock, profile);
   onProgress(2, `Creative direction — ${(creativeDirection.designConcept || '').slice(0, 70)}…`);
 
   onProgress(3, 'Planning page scenes…');
-  const scenePlan = await generateScenePlan(tokens, creativeDirection, ai, (msg) => onProgress(3, msg), profile);
+  const scenePlan = profile.useHeuristicScenePlan
+    ? deriveScenePlan(tokens, creativeDirection, profile)
+    : await generateScenePlan(tokens, creativeDirection, ai, (msg) => onProgress(3, msg), profile);
   onProgress(3, `Scenes — ${(scenePlan.scenes || []).map(s => s.name).join(' → ')}`);
 
   onProgress(4, 'Generating shared components…');
   const components = await generateComponents(tokens, creativeDirection, scenePlan, siteData, framework, ai, (msg) => onProgress(4, msg), componentRefs, diBlock, profile);
 
   onProgress(5, 'Generating pages…');
-  const pages = await generatePages(tokens, creativeDirection, scenePlan, components, siteData, framework, ai, (msg) => onProgress(5, msg), profile);
+  const pages = profile.useDeterministicHomeAssembly
+    ? buildDeterministicPages(tokens, components, framework, profile)
+    : await generatePages(tokens, creativeDirection, scenePlan, components, siteData, framework, ai, (msg) => onProgress(5, msg), profile);
 
   onProgress(6, 'Assembling project boilerplate…');
   const boilerplate = buildBoilerplate(tokens, siteData, framework, pages);
@@ -158,7 +175,7 @@ async function generateRedesign(siteData, framework = 'react', onProgress = () =
 
 // ─── Step 1: Design Tokens ────────────────────────────────────────────────────
 
-async function analyzeAndTokenize(siteData, ai, onLog = () => {}, designSystem = null) {
+async function analyzeAndTokenize(siteData, ai, onLog = () => {}, designSystem = null, profile = {}) {
   const system = `You are a world-class brand strategist, product designer, and design system architect.
 You do NOT just extract styles — you interpret brand identity and elevate it to premium quality.
 Return ONLY valid JSON. No markdown. No explanation. Every field must be filled.`;
@@ -321,7 +338,7 @@ Return ONLY this JSON (no markdown, no backticks, all fields filled):
 }`;
 
   return withRetry(async () => {
-    const raw = (await ai.complete(system, user, 4096, { isJson: true })).trim()
+    const raw = (await ai.complete(system, user, profile.compactHome ? 2500 : 4096, { isJson: true })).trim()
       .replace(/^```json?\n?/, '').replace(/\n?```$/, '');
     try { return JSON.parse(raw); }
     catch (_) {
@@ -333,7 +350,7 @@ Return ONLY this JSON (no markdown, no backticks, all fields filled):
       }
       throw new Error('PARSE_FAIL:' + raw);
     }
-  }, ai, onLog, 'tokenize');
+  }, ai, onLog, 'tokenize', profile.retryCount || 3);
 }
 
 // ─── Step 1b: Creative Direction ──────────────────────────────────────────────
@@ -360,7 +377,70 @@ function deriveDesignTension(tokens = {}) {
   return 'minimal vs expressive';
 }
 
-async function generateCreativeDirection(tokens, siteData, ai, onLog = () => {}, diBlock = '') {
+function deriveCreativeDirection(tokens = {}, siteData = {}) {
+  const archetype = tokens.styleArchetype || 'gradient-saas';
+  const audience = tokens.targetAudience || 'modern internet businesses';
+  const brand = tokens.brandName || siteData.title || 'This brand';
+  return {
+    ...(tokens.creativeDirection || {}),
+    designConcept: `${brand} should feel clear, trustworthy, and polished with a ${archetype} visual direction.`,
+    visualMotif: archetype === 'gradient-saas' ? 'soft gradient emphasis and clean rounded surfaces' : 'subtle structured visual accents',
+    layoutEnergy: archetype === 'minimal-swiss' ? 'calm' : 'balanced',
+    density: 'balanced',
+    uniquenessScore: 'medium',
+    designTension: deriveDesignTension(tokens),
+    doNotDo: [
+      'no fragile overlapping layouts',
+      'no low-contrast text treatments',
+      'no overly complex decorative effects',
+    ],
+    mustHaveMoments: [
+      'clear hero value proposition',
+      'one strong proof/value section',
+      'direct conversion section',
+    ],
+    heroMood: `A high-confidence first impression for ${audience}.`,
+    colorApplication: 'Use primary color for emphasis, keep backgrounds calm, and reserve accent color for CTA moments.',
+    typographyExpression: 'Use strong heading hierarchy with clear readable body text and restrained visual flourishes.',
+    spacingPhilosophy: 'Use generous section spacing and simple alignment so the page feels stable and premium.',
+  };
+}
+
+function deriveScenePlan(tokens = {}, creativeDirection = {}, profile = {}) {
+  const extras = chooseHomeSections(tokens.components || [], profile.maxExtraSections || 2);
+  const sceneByType = {
+    Hero: { goal: 'Hook visitor immediately and explain the offer', layout: 'split-left', density: 'airy', background: 'light', twist: 'clean visual emphasis with a simple supporting UI panel' },
+    Features: { goal: 'Explain the core value clearly', layout: '3-col-grid', density: 'balanced', background: 'light', twist: 'one emphasized feature card' },
+    Stats: { goal: 'Add credibility fast', layout: '4-col-dividers', density: 'dense', background: 'secondary', twist: 'one larger hero stat' },
+    Testimonials: { goal: 'Build trust through social proof', layout: '3-col', density: 'airy', background: 'secondary', twist: 'clean review cards with one highlighted quote' },
+    CTA: { goal: 'Drive the final conversion', layout: 'centered-gradient', density: 'airy', background: 'gradient', twist: 'single focused conversion moment' },
+  };
+
+  const scenes = [
+    {
+      name: 'Hero',
+      componentType: 'Hero',
+      visualHook: creativeDirection.visualMotif || 'clear typographic hero',
+      interaction: 'primary CTA and simple hero interaction',
+      ...sceneByType.Hero,
+    },
+    ...extras.map((type) => ({
+      name: type,
+      componentType: type,
+      visualHook: `${type} section supporting the main conversion story`,
+      interaction: type === 'CTA' ? 'conversion-focused button group' : 'simple hover and reveal states',
+      ...(sceneByType[type] || sceneByType.Features),
+    })),
+  ];
+
+  return {
+    scenes,
+    pageNarrative: 'A short, trustworthy journey from value proposition to proof to conversion.',
+    transitionStyle: 'clean section rhythm with restrained contrast changes',
+  };
+}
+
+async function generateCreativeDirection(tokens, siteData, ai, onLog = () => {}, diBlock = '', profile = {}) {
   const system = `You are a senior creative director and product designer.
 Your priority order is:
 1. Ship a clean, coherent, working website
@@ -421,7 +501,7 @@ Return ONLY this JSON:
       const raw = (await ai.complete(system, user, 2048, { isJson: true })).trim()
         .replace(/^```json?\n?/, '').replace(/\n?```$/, '');
       return JSON.parse(raw);
-    }, ai, onLog, 'creative-direction');
+    }, ai, onLog, 'creative-direction', profile.retryCount || 3);
   } catch (err) {
     console.warn('[generateCreativeDirection] Failed, using tokens seed:', err.message);
     return {
@@ -515,7 +595,7 @@ Return ONLY this JSON:
         });
       }
       return parsed;
-    }, ai, onLog, 'scene-plan');
+    }, ai, onLog, 'scene-plan', profile.retryCount || 3);
   } catch (err) {
     console.warn('[generateScenePlan] Failed, using default scene plan:', err.message);
     const strategy = tokens.componentStrategy || {};
@@ -540,8 +620,8 @@ async function generateComponents(tokens, creativeDirection, scenePlan, siteData
   const isReact = framework === 'react';
   const ext     = isReact ? 'jsx' : 'ts';
   const compDir = isReact ? 'src/components' : 'src/app/components';
-  const tokenCtx = buildTokenContext(tokens, creativeDirection);
-  const siteCtx  = buildSiteContext(siteData);
+  const tokenCtx = buildTokenContext(tokens, creativeDirection, profile);
+  const siteCtx  = buildSiteContext(siteData, profile);
   const navJson  = JSON.stringify((tokens.navLinks || []).slice(0, 5));
 
   // Extract per-component scene from scene plan (with fallbacks from componentStrategy)
@@ -960,10 +1040,17 @@ ${diBlock ? `\nINDUSTRY DESIGN RULES:\n${diBlock}` : ''}`;
 
     onLog(`Generating ${comp.name}…`);
     try {
-      files[filePath] = await generateSingleFile(fullPrompt, framework, ai, onLog, cssCtx);
+      files[filePath] = await generateSingleFile(fullPrompt, framework, ai, onLog, cssCtx, profile);
     } catch (err) {
       console.error(`[pipeline] Failed ${filePath}:`, err.message);
-      files[filePath] = buildStubComponent(comp.name.replace(/\.\w+$/, ''), err.message);
+      const fallback = buildDeterministicComponentFallback(
+        comp.name.replace(/\.\w+$/, ''),
+        tokens,
+        siteData,
+        framework,
+        profile
+      );
+      files[filePath] = fallback || buildStubComponent(comp.name.replace(/\.\w+$/, ''), err.message);
     }
   }
   return files;
@@ -981,8 +1068,8 @@ async function generatePages(tokens, creativeDirection, scenePlan, components, s
     .filter(k => k.includes('/components/') && !k.endsWith('.css'))
     .map(k => k.split('/').pop().replace(/\.\w+$/, ''));
 
-  const tokenCtx = buildTokenContext(tokens, creativeDirection);
-  const siteCtx  = buildSiteContext(siteData);
+  const tokenCtx = buildTokenContext(tokens, creativeDirection, profile);
+  const siteCtx  = buildSiteContext(siteData, profile);
 
   // CSS context block — same as what generateComponents uses — for page-specific styles
   const archetype   = tokens.styleArchetype || 'gradient-saas';
@@ -1074,7 +1161,7 @@ Return ONLY the complete raw ${ext.toUpperCase()} file starting with import stat
 
     onLog(`Generating ${pageName} page…`);
     try {
-      files[filePath] = await generateSingleFile(prompt, framework, ai, onLog, pageCssCtx);
+      files[filePath] = await generateSingleFile(prompt, framework, ai, onLog, pageCssCtx, profile);
     } catch (err) {
       console.error(`[pipeline] Failed ${filePath}:`, err.message);
       files[filePath] = buildStubComponent(pageName, err.message);
@@ -1095,6 +1182,39 @@ function buildPageComponents(pageName, available) {
   if (page === 'contact') return all.filter(c => ['CTA'].includes(c));
   if (page === 'features' || page === 'services') return all.filter(c => ['Features', 'CTA', 'Stats'].includes(c));
   return all.slice(0, 3);
+}
+
+function buildDeterministicPages(tokens, components, framework, profile = {}) {
+  if (framework !== 'react') return {};
+
+  const pageDir = 'src/pages';
+  const available = Object.keys(components)
+    .filter((file) => file.startsWith('src/components/') && file.endsWith('.jsx'))
+    .map((file) => file.split('/').pop().replace(/\.jsx$/, ''))
+    .filter((name) => !['Header', 'Footer', 'Layout'].includes(name));
+
+  const selected = chooseHomeSections(available.filter((name) => name !== 'Hero'), profile.maxExtraSections || 2);
+  const ordered = ['Hero', ...selected].filter((name) => available.includes(name));
+  const imports = [
+    `import Layout from '../components/Layout';`,
+    ...ordered.map((name) => `import ${name} from '../components/${name}';`),
+    `import '../styles/tokens.css';`,
+  ].join('\n');
+
+  const body = ordered.map((name) => `      <${name} />`).join('\n');
+
+  return {
+    [`${pageDir}/Home.jsx`]: `${imports}
+
+export default function Home() {
+  return (
+    <Layout>
+${body}
+    </Layout>
+  );
+}
+`,
+  };
 }
 
 function buildPageStructure(pageName, available, tokens, scenePlan = null) {
@@ -1172,6 +1292,415 @@ export default function ${safeName}() {
   );
 }
 `;
+}
+
+function buildDeterministicComponentFallback(name, tokens, siteData, framework, profile = {}) {
+  if (framework !== 'react' || !profile.compactHome) return null;
+
+  if (name === 'Hero') {
+    const eyebrow = tokens.tagline || `${tokens.brandName} for modern teams`;
+    const heading = siteData.title || `${tokens.brandName} helps teams build faster.`;
+    const description = siteData.description || `${tokens.brandName} gives developers and growing businesses a dependable platform for launching, scaling, and operating online products.`;
+    const primaryCta = tokens.ctaLanguage || 'Get Started';
+
+    return `import '../styles/tokens.css';
+
+export default function Hero() {
+  return (
+    <section className="fallback-hero">
+      <style>{\`
+        .fallback-hero {
+          width: 100%;
+          padding: 96px 0 88px;
+          background:
+            radial-gradient(circle at top left, rgba(var(--primary-rgb), 0.12), transparent 28%),
+            linear-gradient(180deg, var(--bg) 0%, var(--bg-secondary) 100%);
+          border-top: 1px solid var(--border);
+        }
+        .fallback-hero__container {
+          max-width: var(--container);
+          margin: 0 auto;
+          padding: 0 24px;
+          display: grid;
+          grid-template-columns: minmax(0, 1.05fr) minmax(320px, 0.95fr);
+          gap: 40px;
+          align-items: center;
+        }
+        .fallback-hero__eyebrow {
+          margin: 0 0 16px;
+          color: var(--primary);
+          font-size: 0.8rem;
+          font-weight: 700;
+          letter-spacing: 0.12em;
+          text-transform: uppercase;
+        }
+        .fallback-hero__title {
+          margin: 0 0 18px;
+          color: var(--text);
+          font-family: var(--font-heading);
+          font-size: clamp(2.75rem, 6vw, 5rem);
+          font-weight: 800;
+          letter-spacing: -0.04em;
+          line-height: 0.98;
+        }
+        .fallback-hero__copy {
+          margin: 0 0 28px;
+          max-width: 620px;
+          color: var(--text-muted);
+          font-size: 1.08rem;
+          line-height: 1.75;
+        }
+        .fallback-hero__actions {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 14px;
+          margin-bottom: 24px;
+        }
+        .fallback-hero__primary,
+        .fallback-hero__secondary {
+          min-height: 52px;
+          padding: 0 24px;
+          border-radius: var(--radius-full);
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          font-weight: 700;
+          text-decoration: none;
+        }
+        .fallback-hero__primary {
+          background: var(--gradient);
+          color: #ffffff;
+          box-shadow: var(--shadow);
+        }
+        .fallback-hero__secondary {
+          background: var(--bg);
+          color: var(--text);
+          border: 1px solid var(--border);
+        }
+        .fallback-hero__proof {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 12px;
+          color: var(--text-muted);
+          font-size: 0.95rem;
+        }
+        .fallback-hero__proof strong {
+          color: var(--text);
+        }
+        .fallback-hero__panel {
+          padding: 28px;
+          border: 1px solid var(--border);
+          border-radius: var(--radius-lg);
+          background: var(--bg);
+          box-shadow: var(--shadow-lg);
+        }
+        .fallback-hero__panel-label {
+          margin: 0 0 10px;
+          color: var(--primary);
+          font-size: 0.8rem;
+          font-weight: 700;
+          letter-spacing: 0.12em;
+          text-transform: uppercase;
+        }
+        .fallback-hero__panel-title {
+          margin: 0 0 12px;
+          color: var(--text);
+          font-family: var(--font-heading);
+          font-size: 1.4rem;
+          font-weight: 700;
+          letter-spacing: -0.02em;
+        }
+        .fallback-hero__panel-copy {
+          margin: 0 0 20px;
+          color: var(--text-muted);
+          line-height: 1.7;
+        }
+        .fallback-hero__metric-grid {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 14px;
+        }
+        .fallback-hero__metric {
+          padding: 16px;
+          border-radius: var(--radius);
+          background: var(--bg-secondary);
+          border: 1px solid var(--border);
+        }
+        .fallback-hero__metric strong {
+          display: block;
+          margin-bottom: 6px;
+          color: var(--text);
+          font-family: var(--font-heading);
+          font-size: 1.35rem;
+          font-weight: 700;
+        }
+        .fallback-hero__metric span {
+          color: var(--text-muted);
+          font-size: 0.92rem;
+        }
+        @media (max-width: 768px) {
+          .fallback-hero {
+            padding: 80px 0 72px;
+          }
+          .fallback-hero__container {
+            grid-template-columns: 1fr;
+            gap: 28px;
+          }
+          .fallback-hero__metric-grid {
+            grid-template-columns: 1fr;
+          }
+        }
+      \`}</style>
+      <div className="fallback-hero__container">
+        <div>
+          <p className="fallback-hero__eyebrow">${JSON.stringify(eyebrow)}</p>
+          <h1 className="fallback-hero__title">${JSON.stringify(heading)}</h1>
+          <p className="fallback-hero__copy">${JSON.stringify(description)}</p>
+          <div className="fallback-hero__actions">
+            <a href="#" className="fallback-hero__primary">${primaryCta}</a>
+            <a href="#" className="fallback-hero__secondary">View Products</a>
+          </div>
+          <div className="fallback-hero__proof">
+            <span><strong>Trusted</strong> by modern builders</span>
+            <span><strong>Fast</strong> to launch and scale</span>
+            <span><strong>Clear</strong> developer-first workflows</span>
+          </div>
+        </div>
+        <aside className="fallback-hero__panel">
+          <p className="fallback-hero__panel-label">Platform Overview</p>
+          <h2 className="fallback-hero__panel-title">Built for reliable product delivery.</h2>
+          <p className="fallback-hero__panel-copy">
+            ${JSON.stringify(`${tokens.brandName || 'This platform'} combines infrastructure, tooling, and operational clarity so teams can move from first deploy to production growth with less friction.`)}
+          </p>
+          <div className="fallback-hero__metric-grid">
+            <div className="fallback-hero__metric">
+              <strong>Fast</strong>
+              <span>Short path from setup to deploy</span>
+            </div>
+            <div className="fallback-hero__metric">
+              <strong>Secure</strong>
+              <span>Infrastructure designed for production use</span>
+            </div>
+            <div className="fallback-hero__metric">
+              <strong>Scalable</strong>
+              <span>Support growth from small projects to larger workloads</span>
+            </div>
+            <div className="fallback-hero__metric">
+              <strong>Simple</strong>
+              <span>Clear UX without unnecessary setup friction</span>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </section>
+  );
+}
+`;
+  }
+
+  if (name === 'Features') {
+    const audience = tokens.targetAudience || 'builders and teams';
+    const items = [
+      {
+        title: 'Launch Faster',
+        body: `Provision infrastructure quickly with a workflow that stays approachable for ${audience}.`,
+      },
+      {
+        title: 'Scale With Confidence',
+        body: `Move from a single project to production systems using predictable tooling, pricing, and platform support.`,
+      },
+      {
+        title: 'Ship On A Trusted Platform',
+        body: `Combine compute, networking, and developer tooling in one place so teams can focus on product delivery.`,
+      },
+    ];
+
+    return `import '../styles/tokens.css';
+
+const featureItems = ${JSON.stringify(items, null, 2)};
+
+export default function Features() {
+  return (
+    <section className="fallback-features">
+      <style>{\`
+        .fallback-features {
+          width: 100%;
+          padding: 88px 0;
+          background: var(--bg-secondary);
+          border-top: 1px solid var(--border);
+        }
+        .fallback-features__container {
+          max-width: var(--container);
+          margin: 0 auto;
+          padding: 0 24px;
+        }
+        .fallback-features__eyebrow {
+          margin: 0 0 12px;
+          color: var(--primary);
+          font-size: 0.8rem;
+          font-weight: 700;
+          letter-spacing: 0.12em;
+          text-transform: uppercase;
+        }
+        .fallback-features__title {
+          margin: 0 0 16px;
+          color: var(--text);
+          font-family: var(--font-heading);
+          font-size: clamp(2rem, 4vw, 3.25rem);
+          font-weight: 800;
+          letter-spacing: -0.03em;
+          line-height: 1.05;
+        }
+        .fallback-features__copy {
+          margin: 0 0 36px;
+          max-width: 640px;
+          color: var(--text-muted);
+          font-size: 1.05rem;
+          line-height: 1.7;
+        }
+        .fallback-features__grid {
+          display: grid;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 20px;
+        }
+        .fallback-features__card {
+          padding: 28px;
+          border: 1px solid var(--border);
+          border-radius: var(--radius-lg);
+          background: var(--bg);
+          box-shadow: var(--shadow);
+        }
+        .fallback-features__card h3 {
+          margin: 0 0 12px;
+          color: var(--text);
+          font-family: var(--font-heading);
+          font-size: 1.25rem;
+          font-weight: 700;
+          letter-spacing: -0.02em;
+        }
+        .fallback-features__card p {
+          margin: 0;
+          color: var(--text-muted);
+          line-height: 1.7;
+        }
+        @media (max-width: 768px) {
+          .fallback-features {
+            padding: 72px 0;
+          }
+          .fallback-features__grid {
+            grid-template-columns: 1fr;
+          }
+        }
+      \`}</style>
+      <div className="fallback-features__container">
+        <p className="fallback-features__eyebrow">Core Features</p>
+        <h2 className="fallback-features__title">Everything needed to build and grow online.</h2>
+        <p className="fallback-features__copy">
+          ${JSON.stringify(siteData.description || `${tokens.brandName} gives modern teams a dependable foundation for launching and scaling products.`)}
+        </p>
+        <div className="fallback-features__grid">
+          {featureItems.map((item) => (
+            <article key={item.title} className="fallback-features__card">
+              <h3>{item.title}</h3>
+              <p>{item.body}</p>
+            </article>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+`;
+  }
+
+  if (name === 'CTA') {
+    const primaryCta = tokens.ctaLanguage || 'Get Started';
+    return `import '../styles/tokens.css';
+
+export default function CTA() {
+  return (
+    <section className="fallback-cta">
+      <style>{\`
+        .fallback-cta {
+          width: 100%;
+          padding: 88px 0;
+          background: var(--gradient);
+          color: #ffffff;
+        }
+        .fallback-cta__container {
+          max-width: var(--container);
+          margin: 0 auto;
+          padding: 0 24px;
+          text-align: center;
+        }
+        .fallback-cta__eyebrow {
+          margin: 0 0 12px;
+          color: rgba(255,255,255,0.82);
+          font-size: 0.8rem;
+          font-weight: 700;
+          letter-spacing: 0.12em;
+          text-transform: uppercase;
+        }
+        .fallback-cta__title {
+          margin: 0 0 16px;
+          font-family: var(--font-heading);
+          font-size: clamp(2rem, 4.5vw, 3.5rem);
+          font-weight: 800;
+          letter-spacing: -0.03em;
+          line-height: 1.05;
+        }
+        .fallback-cta__copy {
+          margin: 0 auto 28px;
+          max-width: 640px;
+          color: rgba(255,255,255,0.86);
+          font-size: 1.05rem;
+          line-height: 1.7;
+        }
+        .fallback-cta__actions {
+          display: flex;
+          justify-content: center;
+          gap: 14px;
+          flex-wrap: wrap;
+        }
+        .fallback-cta__primary,
+        .fallback-cta__secondary {
+          min-height: 52px;
+          padding: 0 24px;
+          border-radius: var(--radius-full);
+          font-weight: 700;
+          text-decoration: none;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .fallback-cta__primary {
+          background: #ffffff;
+          color: var(--primary);
+        }
+        .fallback-cta__secondary {
+          background: transparent;
+          color: #ffffff;
+          border: 1px solid rgba(255,255,255,0.34);
+        }
+      \`}</style>
+      <div className="fallback-cta__container">
+        <p className="fallback-cta__eyebrow">Start Building</p>
+        <h2 className="fallback-cta__title">Launch your next project with confidence.</h2>
+        <p className="fallback-cta__copy">
+          ${JSON.stringify(siteData.description || `${tokens.brandName} helps teams move from idea to production with a platform designed for speed and reliability.`)}
+        </p>
+        <div className="fallback-cta__actions">
+          <a href="#" className="fallback-cta__primary">${primaryCta}</a>
+          <a href="#" className="fallback-cta__secondary">Talk to Sales</a>
+        </div>
+      </div>
+    </section>
+  );
+}
+`;
+  }
+
+  return null;
 }
 
 // ─── Core generator: 2-call architecture (JSX structure → CSS) ───────────────
@@ -1345,7 +1874,7 @@ const CSS_SYSTEM = `You are a world-class CSS designer creating premium, agency-
 
 Return ONLY raw CSS. First char = first char of CSS. No markdown fences.`;
 
-async function generateSingleFile(prompt, framework, ai, onLog = () => {}, cssContext = '') {
+async function generateSingleFile(prompt, framework, ai, onLog = () => {}, cssContext = '', profile = {}) {
   const isReact = framework === 'react';
   const clean = (raw) => extractFirstCodeBlock(raw)
     .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
@@ -1354,19 +1883,19 @@ async function generateSingleFile(prompt, framework, ai, onLog = () => {}, cssCo
 
   // ── Call 1: JSX structure only ────────────────────────────────────────────
   let jsx = await withRetry(async () => {
-    const raw = (await ai.complete(JSX_SYSTEM(isReact), prompt, ai.modelMax)).trim();
+    const raw = (await ai.complete(JSX_SYSTEM(isReact), prompt, profile.maxJsxTokens || ai.modelMax)).trim();
     return clean(raw);
-  }, ai, onLog, 'generate-jsx');
+  }, ai, onLog, 'generate-jsx', profile.retryCount || 3);
 
   // Continuation only if clearly truncated (missing export default)
-  if (isTruncated(jsx) && !jsx.includes('export default')) {
+  if (profile.allowContinuation !== false && isTruncated(jsx) && !jsx.includes('export default')) {
     onLog('JSX truncated — continuing…');
     const cont = await withRetry(async () => {
       const raw = (await ai.complete(JSX_SYSTEM(isReact),
         `Continue this JSX from where it stopped. Output ONLY remaining code, no repeats.\n\n--- LAST 800 CHARS ---\n${jsx.slice(-800)}`,
-        ai.modelMax)).trim();
+        profile.maxJsxTokens || ai.modelMax)).trim();
       return clean(raw);
-    }, ai, onLog, 'continue-jsx').catch(() => '');
+    }, ai, onLog, 'continue-jsx', profile.retryCount || 3).catch(() => '');
     // Only accept continuation if it looks like JSX continuation (not a new component)
     if (cont && !cont.match(/^import\s+React/m) && !cont.match(/^const \w+ = \(\)/m)) {
       jsx = jsx + '\n' + cont;
@@ -1384,7 +1913,7 @@ async function generateSingleFile(prompt, framework, ai, onLog = () => {}, cssCo
   const structuralIssues = detectSyntaxIssues(jsx);
   if (structuralIssues.length > 0) {
     onLog(`⚠ Structural issues detected — running repair pass (${structuralIssues.join(', ')})…`);
-    jsx = await repairWithAI(jsx, structuralIssues, framework, ai, onLog);
+    jsx = await repairWithAI(jsx, structuralIssues, framework, ai, onLog, profile);
     // Re-apply mechanical fixes after AI repair
     jsx = fixCssVarProps(jsx);
     jsx = fixStringLiterals(jsx);
@@ -1416,9 +1945,9 @@ ${jsx.slice(0, 3000)}
 Return ONLY raw CSS. Start with the first selector. No markdown fences.`;
 
   let css = await withRetry(async () => {
-    const raw = (await ai.complete(CSS_SYSTEM, cssPrompt, Math.min(ai.modelMax, 8192))).trim();
+    const raw = (await ai.complete(CSS_SYSTEM, cssPrompt, Math.min(profile.maxCssTokens || 8192, ai.modelMax))).trim();
     return clean(raw);
-  }, ai, onLog, 'generate-css').catch(() => '');
+  }, ai, onLog, 'generate-css', profile.retryCount || 3).catch(() => '');
 
   if (css) {
     css = stripAnimatedTextTransparency(css, jsx);
@@ -1771,7 +2300,7 @@ function detectSyntaxIssues(code) {
 // Sends broken code back to the AI with targeted error description for repair.
 // Only triggers when mechanical fixes couldn't solve the detected issues.
 
-async function repairWithAI(code, issues, framework, ai, onLog) {
+async function repairWithAI(code, issues, framework, ai, onLog, profile = {}) {
   const isReact = framework === 'react';
   const repairSystem = `You are a ${isReact ? 'React/JSX' : 'Angular/TypeScript'} syntax repair specialist.
 Your ONLY job is to fix the reported syntax issues in the provided component code.
@@ -1797,10 +2326,10 @@ ${code}`;
   try {
     const repaired = await withRetry(async () => {
       // Use a fast, smaller token budget for repair — it just needs to fix structure
-      const budget = Math.min(ai.modelMax, 32000);
+      const budget = Math.min(ai.modelMax, profile.maxRepairTokens || 12000);
       const raw = (await ai.complete(repairSystem, repairPrompt, budget)).trim();
       return extractFirstCodeBlock(raw).trim();
-    }, ai, onLog, 'repair');
+    }, ai, onLog, 'repair', profile.retryCount || 3);
 
     if (repaired && repaired.length > 200 && /export\s+default/.test(repaired)) {
       console.log('[repairWithAI] Repair successful');
@@ -1872,7 +2401,7 @@ async function withRetry(fn, ai, onLog, label = 'call', retries = 3) {
 
 // ─── Context helpers ──────────────────────────────────────────────────────────
 
-function buildTokenContext(tokens, creativeDirection = null) {
+function buildTokenContext(tokens, creativeDirection = null, profile = {}) {
   const angle = tokens.gradientAngle || '135deg';
   const grad = tokens.gradientStart && tokens.gradientEnd
     ? `linear-gradient(${angle}, ${tokens.gradientStart}, ${tokens.gradientEnd})`
@@ -1909,7 +2438,7 @@ Spacing: ${cd.spacingPhilosophy || ''}
 Avoid: ${(cd.doNotDo || []).join(' · ')}
 Must include: ${(cd.mustHaveMoments || []).join(' · ')}` : '';
 
-  return `BRAND IDENTITY:
+  const fullContext = `BRAND IDENTITY:
 Name: ${tokens.brandName} | Type: ${tokens.siteType} | Personality: ${tokens.brandPersonality || 'professional'}
 Audience: ${tokens.targetAudience || 'general'} | Positioning: ${tokens.pricePositioning || 'mid'}
 Tone of voice: ${tokens.toneOfVoice || 'professional'} | Headline style: ${tokens.headlineStyle || 'clear'}
@@ -1950,15 +2479,37 @@ Motion:    var(--transition)  var(--transition-slow)
 Font:      var(--font-heading)  var(--font-body)  var(--font-mono)
 RGB:       var(--primary-rgb)  var(--accent-rgb)  var(--bg-rgb)  var(--border-rgb)
 For raw spacing values use: 8px, 16px, 24px, 32px, 48px, 64px, 80px, 96px (NOT calc(n * var(--spacing-unit)))`;
+
+  if (!profile.compactHome) return fullContext;
+
+  return `BRAND:
+Name: ${tokens.brandName} | Type: ${tokens.siteType} | Personality: ${tokens.brandPersonality || 'professional'}
+Audience: ${tokens.targetAudience || 'general'} | CTA: "${tokens.ctaLanguage || 'Get Started'}"
+
+STYLE:
+Archetype: ${archetype}
+Primary: ${tokens.primaryColor} | Accent: ${tokens.accentColor}
+BG: ${tokens.bgColor} | Text: ${tokens.textColor} | Muted: ${tokens.textMuted}
+Heading font: ${tokens.fontHeading} | Body font: ${tokens.fontBody}
+Gradient: ${grad}
+Radius: ${tokens.borderRadius} | Shadow: ${tokens.boxShadow}
+
+RULES:
+- Use only the standard CSS variables already defined in tokens.css
+- Keep layout simple, stable, and responsive
+- Prefer strong contrast and readable text over decorative effects`;
 }
 
-function buildSiteContext(siteData) {
+function buildSiteContext(siteData, profile = {}) {
+  const headings = (siteData.headings || []).slice(0, profile.compactHome ? 4 : 8);
+  const sections = (siteData.sections || []).slice(0, profile.compactHome ? 2 : 4).map(s => s.headingText || s.textSnippet?.slice(0, 60));
+
   return `SITE CONTENT:
 URL: ${siteData.url} | Title: ${siteData.title}
 Description: ${siteData.description}
 Logo URL: ${siteData.logoUrl || '(not found — generate SVG placeholder)'}
-Headings: ${JSON.stringify((siteData.headings || []).slice(0, 8))}
-Sections: ${JSON.stringify((siteData.sections || []).slice(0, 4).map(s => s.headingText || s.textSnippet?.slice(0, 60)))}`;
+Headings: ${JSON.stringify(headings)}
+Sections: ${JSON.stringify(sections)}`;
 }
 
 // ─── Step 4: Boilerplate (pure JS, no AI needed) ─────────────────────────────

@@ -44,7 +44,7 @@ export default function CompareSlider({ original, redesign }) {
         </div>
 
         {/* Original (Clip path overlay) */}
-        <div style={{ ...s.originalImgWrap, width: `${sliderPos}%` }}>
+        <div style={{ ...s.originalImgWrap, clipPath: `inset(0 ${100 - sliderPos}% 0 0)` }}>
           {original ? (
             <img src={original.startsWith('data:') ? original : `data:image/webp;base64,${original}`} style={s.img} alt="Original" />
           ) : (
@@ -89,11 +89,11 @@ const s = {
     position: 'absolute',
     top: 0,
     left: 0,
-    width: '1000px', // Fixed reference for clipping
-    height: 'auto',
-    minWidth: '100%',
+    width: '100%',
+    height: '100%',
     display: 'block',
     objectFit: 'cover',
+    objectPosition: 'top left',
     pointerEvents: 'none',
   },
   redesignImgWrap: {
@@ -104,12 +104,11 @@ const s = {
   },
   originalImgWrap: {
     position: 'absolute',
-    top: 0,
-    left: 0,
-    bottom: 0,
+    inset: 0,
     zIndex: 2,
     borderRight: '1px solid rgba(255,255,255,0.2)',
     overflow: 'hidden',
+    willChange: 'clip-path',
   },
   handle: {
     position: 'absolute',
