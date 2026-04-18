@@ -171,6 +171,27 @@ async function generateRedesign(siteData, framework = 'react', onProgress = () =
         }
       }
 
+      // Fix 3: image-based heroes should not stack into one column on desktop.
+      // If a hero image panel exists and the base hero grid is forced to 1 column,
+      // normalize it back to a stable two-column desktop split while preserving
+      // the mobile/tablet single-column media queries.
+      if (
+        /\.hero-image-panel\s*\{/.test(fixed) &&
+        /\.hero-content-wrapper\s*\{[^}]*grid-template-columns\s*:\s*1fr\s*;[^}]*\}/s.test(fixed)
+      ) {
+        const before = fixed;
+        fixed = fixed.replace(
+          /\.hero-content-wrapper\s*\{([^}]*)\}/,
+          (match, body) => {
+            const cleaned = body.replace(/grid-template-columns\s*:\s*[^;]+;?\s*/g, '');
+            return `.hero-content-wrapper {\n  ${cleaned.trim()}\n  grid-template-columns: minmax(0, 1fr) minmax(320px, 1fr);\n}`;
+          }
+        );
+        if (fixed !== before) {
+          console.log('[cssPass] Normalized hero desktop layout to two columns');
+        }
+      }
+
       if (fixed !== content) {
         files[filePath] = fixed;
       }
@@ -848,6 +869,9 @@ UNSPLASH IMAGE REQUIREMENT:
 - Use it as a large <img> or as the dominant visual panel/background for the hero.
 - Add a small visible attribution caption directly below or beside the image area.
 - Do not produce a text-only hero when Unsplash images are available.` : ''}
+${hasUnsplashImages ? `
+- DESKTOP LAYOUT RULE: when a hero image is used, the hero content wrapper MUST be a two-column desktop layout with text and image side-by-side.
+- Only switch to a single-column stacked layout inside tablet/mobile media queries.` : ''}
 
 HERO MOOD: ${creativeDirection.heroMood || `Premium ${archetype} feel — ${tokens.brandPersonality} and ${toneOfVoice}`}
 
