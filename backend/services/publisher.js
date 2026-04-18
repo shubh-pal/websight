@@ -72,7 +72,7 @@ function buildProject(jobId) {
   return new Promise((resolve, reject) => {
     console.log(`[publish] Building ${jobId}…`);
     exec(
-      'npm install --prefer-offline --no-audit --no-fund && npm run build',
+      'npm install --include=dev --prefer-offline --no-audit --no-fund && npm run build',
       { cwd: dir, timeout: 180_000 },
       (err, stdout, stderr) => {
         if (err) {
