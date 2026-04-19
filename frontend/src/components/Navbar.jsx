@@ -28,7 +28,6 @@ export default function Navbar() {
         <Link to="/dashboard" style={styles.navLink}>Dashboard</Link>
         <Link to="/" style={styles.navLink}>New Project</Link>
         {user?.isAdmin ? <Link to="/admin" style={styles.navLink}>Admin</Link> : null}
-        <a href="/#pricing" style={styles.navLink}>Pricing</a>
       </div>
 
       {/* Right: User section */}

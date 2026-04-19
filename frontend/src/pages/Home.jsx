@@ -258,65 +258,6 @@ export default function Home() {
         </div>
       </section>
 
-      {/* ══════════ PRICING PREVIEW ══════════ */}
-      <section style={s.section} id="pricing">
-        <div style={s.sectionInner}>
-          <div style={s.sectionLabel}>Pricing</div>
-          <h2 style={s.sectionH2}>Start free. Upgrade when you're ready.</h2>
-          <p style={s.sectionSub}>Pro & Max plans coming soon — join the waitlist for early access and special pricing.</p>
-
-          <div style={s.pricingGrid}>
-            {/* Free */}
-            <div style={s.pricingCard}>
-              <div style={s.pricingPlanName}>Free</div>
-              <div style={s.pricingPrice}><span style={s.pricingAmount}>$0</span><span style={s.pricingPer}>/mo</span></div>
-              <ul style={s.pricingFeatures}>
-                <li style={s.pricingFeature}><span style={{ color: 'var(--green)' }}>✓</span> Unlimited generations</li>
-                <li style={s.pricingFeature}><span style={{ color: 'var(--green)' }}>✓</span> Connect your own AI account</li>
-                <li style={s.pricingFeature}><span style={{ color: 'var(--green)' }}>✓</span> Ready-to-use React project</li>
-                <li style={s.pricingFeature}><span style={{ color: 'var(--green)' }}>✓</span> Dashboard & history</li>
-              </ul>
-              <Link to="/login" style={{ ...s.pricingBtn, background: 'var(--bg-2)', color: 'var(--text)', border: '1px solid var(--border)' }}>
-                Get started free
-              </Link>
-            </div>
-
-            {/* Pro */}
-            <div style={{ ...s.pricingCard, ...s.pricingCardHighlight }}>
-              <div style={s.pricingBadge}>Coming soon</div>
-              <div style={{ ...s.pricingPlanName, color: '#a897ff' }}>Pro</div>
-              <div style={s.pricingPrice}><span style={s.pricingAmount}>$19</span><span style={s.pricingPer}>/mo</span></div>
-              <ul style={s.pricingFeatures}>
-                <li style={s.pricingFeature}><span style={{ color: '#a897ff' }}>✓</span> Everything in Free</li>
-                <li style={s.pricingFeature}><span style={{ color: '#a897ff' }}>✓</span> Hosted API credits included</li>
-                <li style={s.pricingFeature}><span style={{ color: '#a897ff' }}>✓</span> Priority generation queue</li>
-                <li style={s.pricingFeature}><span style={{ color: '#a897ff' }}>✓</span> Multi-page site generation</li>
-              </ul>
-              <button onClick={() => openWaitlist('pro')} style={{ ...s.pricingBtn, background: '#7c6af7', color: '#fff', border: 'none', cursor: 'pointer' }}>
-                Join waitlist →
-              </button>
-            </div>
-
-            {/* Max */}
-            <div style={s.pricingCard}>
-              <div style={s.pricingBadge}>Coming soon</div>
-              <div style={{ ...s.pricingPlanName, color: '#f5a623' }}>Max</div>
-              <div style={s.pricingPrice}><span style={s.pricingAmount}>$49</span><span style={s.pricingPer}>/mo</span></div>
-              <ul style={s.pricingFeatures}>
-                <li style={s.pricingFeature}><span style={{ color: '#f5a623' }}>✓</span> Everything in Pro</li>
-                <li style={s.pricingFeature}><span style={{ color: '#f5a623' }}>✓</span> Unlimited AI credits</li>
-                <li style={s.pricingFeature}><span style={{ color: '#f5a623' }}>✓</span> Premium model access</li>
-                <li style={s.pricingFeature}><span style={{ color: '#f5a623' }}>✓</span> Custom visual styles</li>
-              </ul>
-              <button onClick={() => openWaitlist('max')} style={{ ...s.pricingBtn, background: 'var(--bg-2)', color: 'var(--text)', border: '1px solid var(--border)', cursor: 'pointer' }}>
-                Join waitlist →
-              </button>
-            </div>
-          </div>
-
-        </div>
-      </section>
-
       {/* ══════════ CONTACT ══════════ */}
       <section style={{ ...s.section, background: 'var(--bg-1)' }} id="contact">
         <div style={s.sectionInner}>
@@ -424,7 +365,6 @@ export default function Home() {
           </div>
           <div style={s.footerLinks}>
             <Link to="/login" style={s.footerLink}>Sign In</Link>
-            <a href="#pricing" style={s.footerLink}>Pricing</a>
             <Link to="/settings" style={s.footerLink}>Settings</Link>
             <Link to="/dashboard" style={s.footerLink}>Dashboard</Link>
             <a href="https://www.linkedin.com/in/shubhpalan/" target="_blank" rel="noopener noreferrer" style={s.footerLink}>LinkedIn</a>
