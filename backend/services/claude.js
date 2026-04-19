@@ -15,13 +15,16 @@ function getGenerationProfile(model = '') {
     maxExtraSections: isFreeTier ? 2 : 4,
     maxScenes: isFreeTier ? 3 : 5,
     useDeterministicHomeAssembly: isFreeTier,
+    useDeterministicCompactComponents: isFreeTier,
     fetchComponentReferences: !isFreeTier,
     useHeuristicCreativeDirection: isFreeTier,
     useHeuristicScenePlan: isFreeTier,
+    skipImageSearchPlanning: isFreeTier,
+    skipImageLibrary: isFreeTier,
     maxJsxTokens: isFreeTier ? 7000 : 24000,
     maxCssTokens: isFreeTier ? 4500 : 8192,
     maxRepairTokens: isFreeTier ? 4000 : 12000,
-    retryCount: isFreeTier ? 2 : 3,
+    retryCount: isFreeTier ? 1 : 3,
     allowContinuation: !isFreeTier,
   };
 }
@@ -75,16 +78,23 @@ async function generateRedesign(siteData, framework = 'react', onProgress = () =
     : await generateScenePlan(tokens, creativeDirection, ai, (msg) => onProgress(3, msg), profile);
   onProgress(3, `Scenes — ${(scenePlan.scenes || []).map(s => s.name).join(' → ')}`);
 
-  onProgress(3, 'Planning image search queries…');
-  const imageQueries = await generateImageSearchQueries(siteData, tokens, ai, profile);
-  if (imageQueries.length) {
-    onProgress(3, `Image queries — ${imageQueries.join(' · ')}`);
-  }
+  let imageLibrary = { photos: [], promptBlock: '' };
+  if (!profile.skipImageSearchPlanning) {
+    onProgress(3, 'Planning image search queries…');
+    const imageQueries = await generateImageSearchQueries(siteData, tokens, ai, profile);
+    if (imageQueries.length) {
+      onProgress(3, `Image queries — ${imageQueries.join(' · ')}`);
+    }
 
-  onProgress(3, 'Finding image references…');
-  const imageLibrary = await getImageLibrary(siteData, tokens, imageQueries);
-  if (imageLibrary.photos?.length) {
-    onProgress(3, `Found ${imageLibrary.photos.length} Unsplash image candidates`);
+    if (!profile.skipImageLibrary) {
+      onProgress(3, 'Finding image references…');
+      imageLibrary = await getImageLibrary(siteData, tokens, imageQueries);
+      if (imageLibrary.photos?.length) {
+        onProgress(3, `Found ${imageLibrary.photos.length} Unsplash image candidates`);
+      }
+    }
+  } else {
+    onProgress(3, 'Skipping image search for compact free-tier generation…');
   }
 
   onProgress(4, 'Generating shared components…');
@@ -1102,6 +1112,17 @@ Return ONLY complete raw JSX file.`
     name: `${name}.${ext}`, dir: compDir,
     prompt: extraDefs[name].prompt(),
   }));
+
+  if (profile.useDeterministicCompactComponents && isReact) {
+    const files = {};
+    for (const comp of [...coreComponents, ...extras]) {
+      const compName = comp.name.replace(/\.\w+$/, '');
+      onLog(`Generating ${comp.name}…`);
+      const fallback = buildDeterministicComponentFallback(compName, tokens, siteData, framework, profile);
+      files[`${comp.dir}/${comp.name}`] = fallback || buildStubComponent(compName, 'deterministic compact mode');
+    }
+    return files;
+  }
 
   // Build shared CSS context block for Call 2 (CSS generation)
   const cssCtx = `DESIGN TOKENS:
