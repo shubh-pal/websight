@@ -97,3 +97,17 @@ CREATE TABLE IF NOT EXISTS contact_submissions (
 
 CREATE INDEX IF NOT EXISTS idx_contact_email ON contact_submissions (email);
 CREATE INDEX IF NOT EXISTS idx_contact_created_at ON contact_submissions (created_at DESC);
+
+CREATE TABLE IF NOT EXISTS deployment_reviews (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  job_id TEXT NOT NULL UNIQUE REFERENCES jobs(id) ON DELETE CASCADE,
+  user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  actor_email TEXT,
+  actor_type TEXT,
+  rating INTEGER NOT NULL CHECK (rating >= 1 AND rating <= 5),
+  feedback TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS deployment_reviews_created_at_idx ON deployment_reviews (created_at DESC);
+CREATE INDEX IF NOT EXISTS deployment_reviews_rating_idx ON deployment_reviews (rating);

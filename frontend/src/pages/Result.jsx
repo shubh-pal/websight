@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, Component } from 'react';
-import { useParams, useSearchParams, Link } from 'react-router-dom';
+import { useParams, useSearchParams, Link, useLocation } from 'react-router-dom';
 import ProgressSteps from '../components/ProgressSteps';
 import TokenBadges from '../components/TokenBadges';
 import StackBlitzPreview from '../components/StackBlitzPreview';
@@ -33,6 +33,7 @@ class ResultErrorBoundary extends Component {
 
 export default function Result() {
   const { jobId } = useParams();
+  const location = useLocation();
   const [params] = useSearchParams();
   const sourceUrl = params.get('url') || '';
   const framework = params.get('fw') || 'react';
@@ -45,10 +46,18 @@ export default function Result() {
   const [panelOpen, setPanelOpen] = useState(true);
   const [publish, setPublish]     = useState({ status: null, url: null, error: null }); // null | 'building' | 'live' | 'error'
   const [publishMenuOpen, setPublishMenuOpen] = useState(false);
+  const [reviewModalOpen, setReviewModalOpen] = useState(false);
+  const [reviewRating, setReviewRating] = useState(0);
+  const [reviewFeedback, setReviewFeedback] = useState('');
+  const [reviewSaving, setReviewSaving] = useState(false);
+  const [reviewError, setReviewError] = useState('');
 
   const logsEndRef = useRef(null);
   const sseRef     = useRef(null);
   const publishPollRef = useRef(null);
+  const reviewShownRef = useRef(false);
+
+  const isAdminRoute = location.pathname.startsWith('/admin/');
 
   // ── Load full file map ─────────────────────────────────────────────────────
   const loadFiles = useCallback(async () => {
@@ -124,6 +133,16 @@ export default function Result() {
   useEffect(() => () => {
     if (publishPollRef.current) clearInterval(publishPollRef.current);
   }, []);
+
+  useEffect(() => {
+    if (isAdminRoute) return;
+    if (publish.status !== 'live') return;
+    if (reviewShownRef.current) return;
+    if (window.localStorage.getItem(`deployment-review:${jobId}`) === 'submitted') return;
+
+    reviewShownRef.current = true;
+    setReviewModalOpen(true);
+  }, [isAdminRoute, jobId, publish.status]);
 
 
 
@@ -221,6 +240,34 @@ export default function Result() {
   async function handleRedeploy() {
     setPublishMenuOpen(false);
     await handlePublish(true);
+  }
+
+  async function handleSubmitReview() {
+    if (!reviewRating || reviewSaving) return;
+    setReviewSaving(true);
+    setReviewError('');
+
+    try {
+      const res = await fetch(`/api/jobs/${jobId}/review`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          rating: reviewRating,
+          feedback: reviewFeedback,
+        }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(body.error || 'Failed to save review');
+      }
+      window.localStorage.setItem(`deployment-review:${jobId}`, 'submitted');
+      setReviewModalOpen(false);
+    } catch (err) {
+      setReviewError(err.message);
+    } finally {
+      setReviewSaving(false);
+    }
   }
 
   const isDone    = job?.status === 'done';
@@ -456,6 +503,69 @@ export default function Result() {
           )}
         </main>
       </div>
+
+      {reviewModalOpen && (
+        <div style={s.reviewOverlay} onClick={() => !reviewSaving && setReviewModalOpen(false)}>
+          <div style={s.reviewModal} onClick={(e) => e.stopPropagation()}>
+            <div style={s.reviewEyebrow}>Post Deployment Review</div>
+            <h3 style={s.reviewTitle}>How was the redesign experience?</h3>
+            <p style={s.reviewCopy}>Rate the redesign experience and optionally leave feedback about the deployed output.</p>
+
+            <div style={s.starsRow}>
+              {[1, 2, 3, 4, 5].map((star) => (
+                <button
+                  key={star}
+                  type="button"
+                  onClick={() => setReviewRating(star)}
+                  style={{
+                    ...s.starBtn,
+                    ...(reviewRating >= star ? s.starBtnActive : null),
+                  }}
+                  aria-label={`${star} star${star > 1 ? 's' : ''}`}
+                >
+                  ★
+                </button>
+              ))}
+            </div>
+
+            <label style={s.reviewLabel}>
+              Optional descriptive feedback
+              <textarea
+                value={reviewFeedback}
+                onChange={(e) => setReviewFeedback(e.target.value)}
+                placeholder="Tell us what worked well or what felt rough after deployment."
+                style={s.reviewTextarea}
+                rows={5}
+              />
+            </label>
+
+            {reviewError ? <div style={s.reviewError}>{reviewError}</div> : null}
+
+            <div style={s.reviewActions}>
+              <button
+                type="button"
+                onClick={() => setReviewModalOpen(false)}
+                style={s.reviewSecondaryBtn}
+                disabled={reviewSaving}
+              >
+                Maybe later
+              </button>
+              <button
+                type="button"
+                onClick={handleSubmitReview}
+                style={{
+                  ...s.reviewPrimaryBtn,
+                  opacity: reviewRating ? 1 : 0.55,
+                  cursor: reviewRating ? 'pointer' : 'not-allowed',
+                }}
+                disabled={!reviewRating || reviewSaving}
+              >
+                {reviewSaving ? 'Saving...' : 'Submit Review'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
     </ResultErrorBoundary>
   );
@@ -1048,5 +1158,122 @@ const s = {
     fontWeight: 600,
     cursor: 'pointer',
     transition: 'all 0.15s',
+  },
+  reviewOverlay: {
+    position: 'fixed',
+    inset: 0,
+    background: 'rgba(2, 6, 23, 0.72)',
+    backdropFilter: 'blur(10px)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+    zIndex: 500,
+  },
+  reviewModal: {
+    width: '100%',
+    maxWidth: 560,
+    borderRadius: 24,
+    background: 'linear-gradient(180deg, #0f172a, #111827)',
+    border: '1px solid rgba(148, 163, 184, 0.16)',
+    boxShadow: '0 32px 80px rgba(2, 6, 23, 0.5)',
+    padding: 28,
+    color: '#e2e8f0',
+  },
+  reviewEyebrow: {
+    color: '#7dd3fc',
+    textTransform: 'uppercase',
+    letterSpacing: '0.14em',
+    fontSize: 12,
+    fontWeight: 700,
+    marginBottom: 12,
+  },
+  reviewTitle: {
+    margin: 0,
+    fontSize: 32,
+    lineHeight: 1,
+    letterSpacing: '-0.04em',
+    color: '#f8fafc',
+  },
+  reviewCopy: {
+    margin: '12px 0 20px',
+    color: '#94a3b8',
+    fontSize: 15,
+    lineHeight: 1.6,
+  },
+  starsRow: {
+    display: 'flex',
+    gap: 10,
+    marginBottom: 20,
+  },
+  starBtn: {
+    width: 54,
+    height: 54,
+    borderRadius: 14,
+    border: '1px solid rgba(148, 163, 184, 0.18)',
+    background: '#0b1220',
+    color: '#475569',
+    fontSize: 28,
+    lineHeight: 1,
+    cursor: 'pointer',
+    transition: 'all 0.15s',
+  },
+  starBtnActive: {
+    background: 'linear-gradient(135deg, rgba(251,191,36,0.22), rgba(249,115,22,0.24))',
+    color: '#fbbf24',
+    borderColor: 'rgba(251,191,36,0.38)',
+  },
+  reviewLabel: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 10,
+    fontSize: 13,
+    color: '#cbd5e1',
+    marginBottom: 18,
+  },
+  reviewTextarea: {
+    width: '100%',
+    resize: 'vertical',
+    minHeight: 120,
+    borderRadius: 16,
+    border: '1px solid rgba(148, 163, 184, 0.16)',
+    background: '#0b1220',
+    color: '#e2e8f0',
+    padding: '14px 16px',
+    outline: 'none',
+    fontSize: 14,
+    lineHeight: 1.6,
+    fontFamily: 'inherit',
+  },
+  reviewError: {
+    marginBottom: 14,
+    borderRadius: 14,
+    padding: '12px 14px',
+    background: 'rgba(127, 29, 29, 0.42)',
+    border: '1px solid rgba(248, 113, 113, 0.35)',
+    color: '#fecaca',
+    fontSize: 13,
+  },
+  reviewActions: {
+    display: 'flex',
+    justifyContent: 'flex-end',
+    gap: 12,
+  },
+  reviewSecondaryBtn: {
+    borderRadius: 12,
+    border: '1px solid rgba(148, 163, 184, 0.18)',
+    background: '#111827',
+    color: '#cbd5e1',
+    padding: '12px 16px',
+    cursor: 'pointer',
+    fontWeight: 600,
+  },
+  reviewPrimaryBtn: {
+    borderRadius: 12,
+    border: 'none',
+    background: 'linear-gradient(135deg, #2563eb, #7c3aed)',
+    color: '#fff',
+    padding: '12px 16px',
+    fontWeight: 700,
   },
 };
