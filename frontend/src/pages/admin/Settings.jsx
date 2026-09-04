@@ -86,6 +86,7 @@ export default function Settings() {
             <div style={{ display: 'flex', gap: 10 }}>
               <Field label="Price min ($)"><input type="number" value={form.price_min} onChange={f('price_min')} style={input} /></Field>
               <Field label="Price max ($)"><input type="number" value={form.price_max} onChange={f('price_max')} style={input} /></Field>
+              <Field label="Price per page ($)"><input type="number" value={form.price_per_page} onChange={f('price_per_page')} style={input} /></Field>
               <Field label="Delivery (days)"><input type="number" value={form.delivery_days} onChange={f('delivery_days')} style={input} /></Field>
             </div>
           </div>

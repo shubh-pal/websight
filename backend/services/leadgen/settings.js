@@ -10,7 +10,7 @@ const DEFAULTS = {
   company: {
     name: '', website: '', contact_email: '', contact_phone: '', portfolio_url: '',
     logo_gcs_key: null,
-    price_min: 200, price_max: 1000, delivery_days: 7,
+    price_min: 200, price_max: 1000, price_per_page: 200, delivery_days: 7,
     tagline: 'Modern, fast, mobile-first websites — delivered in about a week.',
   },
 };

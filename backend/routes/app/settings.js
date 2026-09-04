@@ -16,12 +16,13 @@ router.get('/company', async (req, res) => {
   });
 });
 
-const FIELDS = ['name', 'website', 'contact_email', 'contact_phone', 'portfolio_url', 'tagline', 'price_min', 'price_max', 'delivery_days'];
+const FIELDS = ['name', 'website', 'contact_email', 'contact_phone', 'portfolio_url', 'tagline', 'price_min', 'price_max', 'price_per_page', 'delivery_days'];
+const NUMERIC_FIELDS = ['price_min', 'price_max', 'price_per_page', 'delivery_days'];
 router.put('/company', async (req, res) => {
   const patch = {};
   for (const f of FIELDS) {
     if (req.body?.[f] === undefined) continue;
-    patch[f] = ['price_min', 'price_max', 'delivery_days'].includes(f) ? Number(req.body[f]) : String(req.body[f]);
+    patch[f] = NUMERIC_FIELDS.includes(f) ? Number(req.body[f]) : String(req.body[f]);
   }
   res.json(await settings.setCompany(patch));
 });

@@ -1,7 +1,11 @@
 /**
- * Builds the pitch PDF as a 16:9 slide deck (1280x720 per slide, matches
- * PowerPoint widescreen at 13.333in x 7.5in) once a redesign mockup exists.
- * Puppeteer only — no external API calls, no per-PDF cost.
+ * Builds the pitch PDF as a 16:9 slide deck (960x540pt, PowerPoint widescreen)
+ * once a redesign mockup exists. Puppeteer only — no external API calls, no
+ * per-PDF cost.
+ *
+ * Ported from the approved "v3 — Creative" draft
+ * (backend/templates/pitch/v3-creative.html). Keep that file and this
+ * renderer in sync if the design changes again.
  */
 const puppeteer = require('puppeteer');
 const gcs = require('../gcsStorage');
@@ -25,191 +29,160 @@ async function toDataUrl(key) {
   }
 }
 
-function darken(hex, amt = 0.55) {
-  if (!hex || !/^#([0-9a-f]{6})$/i.test(hex)) return '#0f172a';
-  const n = parseInt(hex.slice(1), 16);
-  const r = Math.round(((n >> 16) & 255) * amt);
-  const g = Math.round(((n >> 8) & 255) * amt);
-  const b = Math.round((n & 255) * amt);
-  return `rgb(${r},${g},${b})`;
+function duoMedia(url) {
+  return url
+    ? `<img src="${url}" />`
+    : `<div class="placeholder" style="width:100%;height:100%"><span>no image yet</span></div>`;
 }
 
-function renderHtml({ lead, company, designSystem, mockup, before, leadLogo, companyLogo }) {
+function renderHtml({ lead, company, designSystem, mockup, before }) {
   const colors = designSystem?.colors || {};
   const fonts = designSystem?.fonts || {};
   const verdict = lead.qualify_raw && !lead.qualify_raw.error ? lead.qualify_raw : null;
-  const headline = verdict?.pitch_angle || `${lead.name}, your website is losing you customers.`;
-  const positioning = verdict?.summary || 'Your current site is holding your business back online.';
-  const reasons = (lead.audit_reasons || '').split(';').map((r) => r.trim()).filter(Boolean);
-  const accent = colors.primary || '#6366f1';
-  const accentDark = darken(accent, 0.35);
-  const fontImport = fonts.googleImport || "@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');";
-  const headingFont = fonts.heading ? `'${fonts.heading}', Inter, sans-serif` : "Inter, sans-serif";
-  const bodyFont = fonts.body ? `'${fonts.body}', Inter, sans-serif` : "Inter, sans-serif";
+  const headline = verdict?.pitch_angle || `${lead.name}, it's time to stand out online.`;
   const location = [lead.city, lead.country].filter(Boolean).join(', ');
-  const priceRange = `$${company.price_min}–$${company.price_max}`;
+  const accent = colors.accent || colors.primary || '#b45309';
+  const headingFont = fonts.heading || 'serif';
+  const bodyFont = fonts.body || 'sans-serif';
+  const pricePerPage = company.price_per_page ?? company.price_min ?? 200;
 
   return `<!doctype html><html><head><meta charset="utf-8"><style>
-    ${fontImport}
+    @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap');
     * { box-sizing: border-box; }
     html, body { margin: 0; padding: 0; }
-    body { font-family: ${bodyFont}; color: #0f172a; }
+    body { font-family: 'Inter', sans-serif; }
     .slide {
       width: 1280px; height: 720px; position: relative; overflow: hidden;
-      page-break-after: always; background: #ffffff;
+      background: #faf9f6; color: #1c1917; page-break-after: always;
     }
     .slide:last-child { page-break-after: auto; }
-    .pad { padding: 64px 72px; height: 100%; box-sizing: border-box; }
-    h1, h2, h3 { font-family: ${headingFont}; margin: 0; letter-spacing: -0.02em; }
-    .eyebrow { text-transform: uppercase; letter-spacing: 0.16em; font-size: 13px; font-weight: 700; color: ${accent}; }
-    .eyebrow.light { color: rgba(255,255,255,0.85); }
-    p { font-family: ${bodyFont}; line-height: 1.6; font-size: 17px; color: #475569; margin: 0; }
+    .pad { padding: 60px 72px; height: 100%; box-sizing: border-box; position: relative; z-index: 2; }
+    .serif { font-family: 'Fraunces', serif; margin: 0; letter-spacing: -0.01em; }
+    .kicker { text-transform: uppercase; letter-spacing: 0.18em; font-size: 11.5px; font-weight: 600; color: #78716c; }
+    p { line-height: 1.65; font-size: 16px; color: #57534e; margin: 0; }
+    .rule { height: 1px; background: #d6d3cd; border: none; }
+    .num-watermark { position: absolute; font-family: 'Fraunces', serif; font-weight: 600; font-size: 280px; color: rgba(0,0,0,0.045); line-height: 1; z-index: 0; user-select: none; }
+    .page-num { position: absolute; bottom: 28px; right: 32px; font-size: 12px; color: #a8a29e; z-index: 3; }
+    .page-num.on-dark { color: rgba(255,255,255,0.5); }
 
-    /* ---- Slide 1: Cover ---- */
-    .cover { color: #fff; background: linear-gradient(135deg, ${accentDark}, #0f172a); }
-    .cover-bg { position: absolute; inset: 0; }
-    .cover-bg img { width: 100%; height: 100%; object-fit: cover; opacity: 0.34; }
-    .cover-scrim { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(15,23,42,0.15) 0%, rgba(15,23,42,0.92) 78%); }
-    .cover-content { position: relative; z-index: 2; display: flex; flex-direction: column; justify-content: flex-end; height: 100%; }
-    .cover-content h1 { font-size: 52px; color: #fff; line-height: 1.08; max-width: 980px; margin: 18px 0 14px; }
-    .cover-content .meta { font-size: 16px; color: rgba(255,255,255,0.75); }
-    .brand-row { position: absolute; top: 40px; left: 72px; right: 72px; z-index: 3; display: flex; justify-content: space-between; align-items: center; }
-    .brand-row img { height: 30px; object-fit: contain; filter: brightness(0) invert(1); }
-    .brand-row .agency-name { color: #fff; font-weight: 700; font-size: 15px; }
+    .duo { position: absolute; inset: 0; z-index: 0; }
+    .duo img, .duo .placeholder { width: 100%; height: 100%; object-fit: cover; filter: grayscale(1) contrast(1.05); }
+    .duo-tint { position: absolute; inset: 0; mix-blend-mode: multiply; }
+    .duo-scrim { position: absolute; inset: 0; background: linear-gradient(0deg, rgba(20,17,15,0.94) 10%, rgba(20,17,15,0.15) 62%); }
+    .cover-text { position: relative; z-index: 2; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; color: #fff; }
+    .cover-text h1 { font-size: 54px; line-height: 1.06; max-width: 900px; color: #fff; }
+    .wordmark { position: absolute; top: 44px; left: 72px; z-index: 3; font-family: 'Fraunces', serif; font-weight: 600; font-size: 18px; color: #fff; }
 
-    /* ---- Section header used on inner slides ---- */
-    .section-head { margin-bottom: 30px; }
-    .section-head h2 { font-size: 34px; margin-top: 8px; color: #0f172a; }
+    .filmstrip { display: flex; height: 100%; align-items: stretch; }
+    .filmstrip .panel { flex: 1; position: relative; }
+    .filmstrip .panel img, .filmstrip .panel .placeholder { width: 100%; height: 100%; object-fit: cover; filter: grayscale(0.15); }
+    .filmstrip .caption { position: absolute; bottom: 26px; left: 26px; z-index: 3; }
+    .filmstrip .caption .mono { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; font-family: 'Inter'; }
+    .filmstrip .caption .n { font-family: 'Fraunces', serif; font-size: 26px; color: #fff; }
+    .filmstrip .divider-arrow { width: 64px; background: #1c1917; display: flex; align-items: center; justify-content: center; color: #faf9f6; font-size: 22px; z-index: 3; }
+    .filmstrip .scrim { position: absolute; inset: 0; background: linear-gradient(0deg, rgba(0,0,0,0.55), transparent 50%); z-index: 2; }
 
-    /* ---- Slide 2: What we noticed ---- */
-    .split { display: flex; height: 100%; }
-    .split .left { flex: 0 0 46%; background: #0f172a; position: relative; }
-    .split .left img { width: 100%; height: 100%; object-fit: cover; opacity: 0.9; }
-    .split .right { flex: 1; padding: 64px 56px; display: flex; flex-direction: column; justify-content: center; }
-    .reason-card { display: flex; gap: 14px; align-items: flex-start; margin-bottom: 18px; }
-    .reason-dot { width: 10px; height: 10px; border-radius: 50%; background: ${accent}; margin-top: 7px; flex-shrink: 0; }
-    .reason-card p { font-size: 17px; color: #1e293b; }
+    .palette-strip { display: flex; height: 90px; border-radius: 4px; overflow: hidden; margin-top: 26px; }
+    .palette-strip div { flex: 1; }
+    .glyph-row { display: flex; gap: 56px; margin-top: 30px; align-items: baseline; }
+    .glyph-row .Aa { font-size: 110px; line-height: 1; }
+    .glyph-row .meta { font-size: 12px; color: #78716c; margin-top: 8px; text-transform: uppercase; letter-spacing: 0.08em; }
 
-    /* ---- Slide 3: Brand direction ---- */
-    .swatch-row { display: flex; gap: 14px; margin: 26px 0 22px; flex-wrap: wrap; }
-    .swatch { text-align: center; }
-    .chip { width: 56px; height: 56px; border-radius: 12px; border: 1px solid #e2e8f0; margin-bottom: 6px; }
-    .swatch span { font-size: 11px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.06em; }
-    .type-sample { display: flex; gap: 40px; margin-top: 16px; }
-    .type-sample div span { display: block; font-size: 11px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 4px; }
-    .type-sample div strong { font-size: 26px; }
+    .placeholder { background: #e7e5e0; display: flex; align-items: center; justify-content: center; }
+    .placeholder span { font-family: 'Inter'; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: #a8a29e; }
 
-    /* ---- Slide 4: Before / After ---- */
-    .ba { display: flex; height: 100%; }
-    .ba figure { flex: 1; margin: 0; position: relative; }
-    .ba img { width: 100%; height: 100%; object-fit: cover; display: block; }
-    .ba figcaption { position: absolute; top: 24px; left: 24px; padding: 6px 16px; border-radius: 999px; font-size: 12px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; }
-    .ba .before figcaption { background: rgba(15,23,42,0.75); color: #fff; }
-    .ba .after figcaption { background: ${accent}; color: #fff; }
-    .ba-divider { width: 4px; background: ${accent}; }
-
-    /* ---- Slide 5: Scope ---- */
-    .scope { background: linear-gradient(135deg, ${accentDark}, #0f172a); color: #fff; display: flex; align-items: center; }
-    .scope-inner { padding: 0 72px; width: 100%; }
-    .scope .price { font-size: 96px; font-weight: 800; letter-spacing: -0.03em; margin: 14px 0 10px; }
-    .scope .tagline { font-size: 19px; color: rgba(255,255,255,0.85); max-width: 640px; }
-    .scope-facts { display: flex; gap: 40px; margin-top: 34px; }
-    .scope-facts div { font-size: 15px; color: rgba(255,255,255,0.9); }
-    .scope-facts strong { display: block; font-size: 22px; margin-bottom: 4px; }
-
-    /* ---- Slide 6: Contact / CTA ---- */
-    .cta-slide { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; text-align: center; }
-    .cta-slide img.logo { height: 46px; object-fit: contain; margin-bottom: 28px; }
-    .cta-slide h1 { font-size: 44px; max-width: 780px; }
-    .cta-btn { margin-top: 30px; padding: 16px 34px; border-radius: 12px; background: ${accent}; color: #fff; font-weight: 700; font-size: 17px; text-decoration: none; }
-    .contact-row { margin-top: 34px; font-size: 15px; color: #64748b; display: flex; gap: 22px; }
+    .price-fine { font-family: 'Fraunces', serif; font-size: 40px; }
   </style></head><body>
 
-  <!-- Slide 1: Cover -->
-  <div class="slide cover">
-    <div class="brand-row">
-      ${companyLogo ? `<img src="${companyLogo}" />` : `<span class="agency-name">${esc(company.name || 'Website Redesign')}</span>`}
-      <span class="eyebrow light">Website Redesign Proposal</span>
+  <!-- 1/5 Cover -->
+  <div class="slide">
+    <div class="duo">${duoMedia(mockup)}</div>
+    <div class="duo-tint" style="background:${accent}"></div>
+    <div class="duo-scrim"></div>
+    <div class="wordmark">${esc(company.name || 'Your Agency')}</div>
+    <div class="cover-text pad">
+      <div class="kicker" style="color:rgba(255,255,255,0.7)">Redesign proposal &middot; ${esc(lead.name)}${location ? ` &middot; ${esc(location)}` : ''}</div>
+      <h1 class="serif">${esc(headline)}</h1>
+      <p style="color:rgba(255,255,255,0.65);margin-top:16px;max-width:560px">${esc(lead.category || '')}${lead.category ? ' &mdash; ' : ''}prepared exclusively for ${esc(lead.name)}.</p>
     </div>
-    <div class="cover-bg">${mockup ? `<img src="${mockup}" />` : ''}</div>
-    <div class="cover-scrim"></div>
-    <div class="cover-content pad">
-      <span class="eyebrow light">Prepared for ${esc(lead.name)}${location ? ` · ${esc(location)}` : ''}</span>
-      <h1>${esc(headline)}</h1>
-      <span class="meta">${esc(lead.category || '')}</span>
-    </div>
+    <div class="num-watermark" style="bottom:-70px;right:20px;color:rgba(255,255,255,0.06)">01</div>
+    <div class="page-num on-dark">01 / 05</div>
   </div>
 
-  <!-- Slide 2: What we noticed -->
+  <!-- 2/5 Before/After filmstrip -->
   <div class="slide">
-    <div class="split">
-      <div class="left">${before ? `<img src="${before}" />` : ''}</div>
-      <div class="right">
-        <div class="eyebrow">What we noticed</div>
-        <h2 style="font-size:32px;margin:10px 0 26px">Your site today</h2>
-        ${reasons.length
-          ? reasons.map((r) => `<div class="reason-card"><div class="reason-dot"></div><p>${esc(r)}</p></div>`).join('')
-          : `<p>${esc(positioning)}</p>`}
+    <div class="filmstrip">
+      <div class="panel">
+        <div class="scrim"></div>
+        ${duoMedia(before)}
+        <div class="caption"><div class="n serif">Before</div><div class="mono" style="color:rgba(255,255,255,0.7)">current site</div></div>
+      </div>
+      <div class="divider-arrow">&rarr;</div>
+      <div class="panel">
+        <div class="scrim"></div>
+        ${duoMedia(mockup)}
+        <div class="caption"><div class="n serif">After</div><div class="mono" style="color:rgba(255,255,255,0.7)">the redesign</div></div>
       </div>
     </div>
+    <div class="num-watermark" style="bottom:-60px;left:50%;transform:translateX(-50%);color:rgba(0,0,0,0.04)">02</div>
+    <div class="page-num">02 / 05</div>
   </div>
 
-  <!-- Slide 3: Brand direction -->
+  <!-- 3/5 The craft -->
   <div class="slide">
+    <div class="num-watermark" style="top:-40px;left:40px">03</div>
     <div class="pad">
-      <div class="section-head">
-        <div class="eyebrow">Brand direction</div>
-        <h2>Where we'd take it</h2>
+      <div class="kicker">The craft</div>
+      <h2 class="serif" style="font-size:36px;margin:14px 0 4px">A system, not a template</h2>
+      <p style="max-width:600px">Every color and typeface below is pulled from ${esc(lead.name)}'s own brand signals &mdash; the redesign extends what already exists.</p>
+      ${Object.keys(colors).length ? `<div class="palette-strip">${Object.values(colors).filter(Boolean).map((v) => `<div style="background:${esc(v)}"></div>`).join('')}</div>` : ''}
+      <div class="glyph-row">
+        <div><div class="Aa" style="font-family:'${esc(headingFont)}',serif">Aa</div><div class="meta">${esc(headingFont)} &middot; Heading</div></div>
+        <div><div class="Aa" style="font-family:'${esc(bodyFont)}',sans-serif;font-weight:400">Aa</div><div class="meta">${esc(bodyFont)} &middot; Body</div></div>
       </div>
-      <p style="max-width:820px;font-size:18px">${esc(positioning)}</p>
-      ${Object.keys(colors).length ? `
-        <div class="swatch-row">
-          ${Object.entries(colors).filter(([, v]) => v).map(([k, v]) => `<div class="swatch"><div class="chip" style="background:${esc(v)}"></div><span>${esc(k)}</span></div>`).join('')}
-        </div>` : ''}
-      ${fonts.heading ? `
-        <div class="type-sample">
-          <div><span>Heading</span><strong style="font-family:${headingFont}">${esc(fonts.heading)}</strong></div>
-          <div><span>Body</span><strong style="font-family:${bodyFont};font-weight:400">${esc(fonts.body || fonts.heading)}</strong></div>
-        </div>` : ''}
     </div>
+    <div class="page-num">03 / 05</div>
   </div>
 
-  <!-- Slide 4: Before / After -->
+  <!-- 4/5 The investment -->
   <div class="slide">
-    <div class="ba">
-      <figure class="before">${before ? `<img src="${before}" />` : ''}<figcaption>Before</figcaption></figure>
-      <div class="ba-divider"></div>
-      <figure class="after">${mockup ? `<img src="${mockup}" />` : ''}<figcaption>After</figcaption></figure>
-    </div>
-  </div>
-
-  <!-- Slide 5: Scope & investment -->
-  <div class="slide scope">
-    <div class="scope-inner">
-      <span class="eyebrow light">Scope &amp; investment</span>
-      <div class="price">${priceRange}</div>
-      <p class="tagline">${esc(company.tagline)}</p>
-      <div class="scope-facts">
-        <div><strong>~${company.delivery_days} days</strong>delivery</div>
-        <div><strong>Fully responsive</strong>desktop, tablet, mobile</div>
-        <div><strong>Your brand</strong>built on what you already have</div>
+    <div class="num-watermark" style="top:-40px;right:40px">04</div>
+    <div class="pad">
+      <div class="kicker">The investment</div>
+      <h2 class="serif" style="font-size:38px;margin:14px 0 26px;max-width:700px">Stand out against your competitors at the cost of just a dinner.</h2>
+      <div style="display:flex;align-items:baseline;gap:14px">
+        <span class="price-fine" style="font-size:92px">$${pricePerPage}</span>
+        <span style="color:#78716c;font-size:16px">per page &middot; fixed price, no surprises</span>
+      </div>
+      <hr class="rule" style="max-width:780px;margin:34px 0 30px">
+      <div style="display:flex;gap:56px;max-width:840px">
+        <div style="flex:1.2">
+          <div class="kicker" style="color:${accent}">Why is it so affordable?</div>
+          <p style="margin-top:10px;font-size:15.5px">Not because the quality is lower. Because the power of AI lets us spend less time on repetitive production &mdash; and more time on the decisions that make your business feel distinct.</p>
+        </div>
+        <div style="width:1px;background:#d6d3cd"></div>
+        <div style="flex:1;display:flex;flex-direction:column;gap:18px">
+          <div><div class="kicker" style="font-size:11px">The human part</div><p style="margin-top:4px;font-size:14.5px">Your story, offer, voice and local insight.</p></div>
+          <div><div class="kicker" style="font-size:11px">The AI-assisted part</div><p style="margin-top:4px;font-size:14.5px">Faster research, layouts, iteration and delivery.</p></div>
+        </div>
       </div>
     </div>
+    <div class="page-num">04 / 05</div>
   </div>
 
-  <!-- Slide 6: Contact / CTA -->
+  <!-- 5/5 Close -->
   <div class="slide">
-    <div class="cta-slide">
-      ${companyLogo ? `<img class="logo" src="${companyLogo}" />` : ''}
-      <h1>Let's build ${esc(lead.name)} a website that works as hard as you do.</h1>
-      <a class="cta-btn" href="mailto:${esc(company.contact_email)}">Get started</a>
-      <div class="contact-row">
-        <span>${esc(company.name)}</span>
-        ${company.website ? `<span>${esc(company.website)}</span>` : ''}
-        <span>${esc(company.contact_email)}</span>
-        ${company.contact_phone ? `<span>${esc(company.contact_phone)}</span>` : ''}
+    <div class="duo">${duoMedia(mockup)}</div>
+    <div class="duo-tint" style="background:${accent}"></div>
+    <div class="duo-scrim" style="background:linear-gradient(0deg, rgba(20,17,15,0.96) 30%, rgba(20,17,15,0.55) 100%)"></div>
+    <div class="cover-text pad" style="justify-content:center;align-items:flex-start">
+      <div class="kicker" style="color:rgba(255,255,255,0.6)">Ready when you are</div>
+      <h1 class="serif" style="font-size:42px;max-width:640px">Let's give ${esc(lead.name)} a site worthy of the work you already do.</h1>
+      <div style="margin-top:30px;font-size:15px;color:rgba(255,255,255,0.8);display:flex;gap:24px">
+        <span>${esc(company.name)}</span><span>${esc(company.contact_email)}</span><span>${esc(company.contact_phone)}</span><span>${esc(company.website)}</span>
       </div>
     </div>
+    <div class="page-num on-dark">05 / 05</div>
   </div>
 
   </body></html>`;
@@ -229,24 +202,21 @@ async function buildProposalPdf(leadId) {
 
   const manual = lead.manual_assets || {};
   const sig = lead.audit_signals || {};
-  const [mockup, before, leadLogo, companyLogo] = await Promise.all([
+  const [mockup, before] = await Promise.all([
     toDataUrl(lead.mockup_gcs_key),
     toDataUrl(manual.screenshot || sig.screenshot),
-    toDataUrl(manual.logo || sig.logo),
-    toDataUrl(company.logo_gcs_key),
   ]);
 
-  const html = renderHtml({ lead, company, designSystem, mockup, before, leadLogo, companyLogo });
+  const html = renderHtml({ lead, company, designSystem, mockup, before });
 
   const browser = await puppeteer.launch({ headless: 'new', args: ['--no-sandbox', '--disable-setuid-sandbox'] });
   try {
     const page = await browser.newPage();
     await page.setViewport({ width: 1280, height: 720 });
     await page.setContent(html, { waitUntil: 'networkidle0', timeout: 30000 });
-    // Widescreen slide size (1280x720 @ 96dpi = 13.333in x 7.5in, PowerPoint widescreen).
     const pdfBuffer = await page.pdf({
       width: '1280px', height: '720px', printBackground: true,
-      margin: { top: 0, bottom: 0, left: 0, right: 0 }, preferCSSPageSize: false,
+      margin: { top: 0, bottom: 0, left: 0, right: 0 },
     });
     const key = `companies/${leadId}/proposal.pdf`;
     if (gcs.isEnabled) await gcs.uploadFile(key, pdfBuffer, 'application/pdf');

@@ -10,6 +10,14 @@ const { buildProposalPdf } = require('./proposalPdf');
 
 const CONTENT_TYPE = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp' };
 
+// A mockup can be uploaded/replaced any time from "approved" onward — including
+// after the proposal already went out, so a correction just rebuilds the PDF
+// and re-queues it.
+const MOCKUP_ELIGIBLE_STATUSES = [
+  'building_pdf', 'ui_generated', 'queued_for_mail',
+  'contacted', 'replied', 'bounced', 'error',
+];
+
 async function receiveMockup(leadId, buffer, ext, { source = 'manual' } = {}) {
   if (!gcs.isEnabled) throw new Error('GCS not configured');
   const contentType = CONTENT_TYPE[ext];
@@ -18,8 +26,8 @@ async function receiveMockup(leadId, buffer, ext, { source = 'manual' } = {}) {
 
   const [lead] = await store.q(`SELECT * FROM leads WHERE id = $1`, [leadId]);
   if (!lead) throw new Error('lead not found');
-  if (!['building_pdf', 'ui_generated', 'error'].includes(lead.status)) {
-    throw new Error(`lead is '${lead.status}', expected 'building_pdf'`);
+  if (!MOCKUP_ELIGIBLE_STATUSES.includes(lead.status)) {
+    throw new Error(`lead is '${lead.status}' — approve it first (must be past 'waiting_approval')`);
   }
 
   const key = `companies/${leadId}/mockup.${ext === 'jpeg' ? 'jpg' : ext}`;
