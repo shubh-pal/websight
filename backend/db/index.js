@@ -1,4 +1,6 @@
 const { Pool } = require('pg');
+const fs = require('fs');
+const path = require('path');
 
 let pool = null;
 
@@ -81,6 +83,18 @@ async function ensureSchema() {
        WHERE LOWER(email) = ANY($1::text[])`,
       [adminEmails]
     );
+  }
+
+  // Agency pipeline tables (idempotent CREATE ... IF NOT EXISTS).
+  try {
+    const migrationSql = fs.readFileSync(
+      path.join(__dirname, '../migrations/agency_pipeline.sql'),
+      'utf-8'
+    );
+    await pool.query(migrationSql);
+    console.log('[db] Agency pipeline schema ready');
+  } catch (err) {
+    console.error('[db] Agency pipeline migration failed:', err.message);
   }
 }
 

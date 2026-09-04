@@ -93,3 +93,6 @@ storage/
 # ===========================
 *.pem
 .yarn-integrity
+
+# Local secrets (never commit)
+env.yaml
