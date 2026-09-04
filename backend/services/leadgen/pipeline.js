@@ -8,9 +8,8 @@
 const store = require('./store');
 const { scrapeLead } = require('./scrapeWorker');
 const { auditLead } = require('./audit');
+const { qualifyLead } = require('./qualify');
 const { TICK_LIMITS } = require('./config');
-
-let qualifyLead = null; // wired in Phase C
 
 async function runStage(fromStatus, workingStatus, limit, handler) {
   const claimed = await store.claimLeads(fromStatus, workingStatus, limit);
@@ -38,16 +37,9 @@ async function tick(limits = {}) {
 
   result.scrape = await runStage('discovered', 'scraping', L.scrape, scrapeLead);
   result.audit = await runStage('scraped', 'auditing', L.audit, auditLead);
-
-  if (qualifyLead) {
-    result.qualify = await runStage('audited', 'qualifying', L.qualify, qualifyLead);
-  }
+  result.qualify = await runStage('audited', 'qualifying', L.qualify, qualifyLead);
 
   return result;
 }
 
-function registerQualify(fn) {
-  qualifyLead = fn;
-}
-
-module.exports = { tick, runStage, registerQualify };
+module.exports = { tick, runStage };

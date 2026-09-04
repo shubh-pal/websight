@@ -32,7 +32,7 @@ async function createNiche({ name, search_terms = [], locations = [], notes = nu
 async function updateNiche(id, patch) {
   const cols = [];
   const vals = [];
-  for (const k of ['name', 'search_terms', 'locations', 'active', 'notes']) {
+  for (const k of ['name', 'search_terms', 'locations', 'active', 'notes', 'min_score']) {
     if (patch[k] === undefined) continue;
     vals.push(k === 'search_terms' || k === 'locations' ? JSON.stringify(patch[k]) : patch[k]);
     cols.push(`${k} = $${vals.length + 1}${(k === 'search_terms' || k === 'locations') ? '::jsonb' : ''}`);

@@ -7,9 +7,20 @@ const { runDiscovery } = require('../../services/leadgen/discover');
 const store = require('../../services/leadgen/store');
 const niches = require('../../services/leadgen/niches');
 const rerun = require('../../services/leadgen/rerun');
+const settings = require('../../services/leadgen/settings');
+const { reevaluate } = require('../../services/leadgen/qualify');
 const gcs = require('../../services/gcsStorage');
 
 const router = express.Router();
+
+// ── Settings ──────────────────────────────────────────────────────────────
+router.get('/settings', async (req, res) => res.json(await settings.get()));
+router.put('/settings', async (req, res) => {
+  const patch = {};
+  if (req.body?.default_min_score != null) patch.default_min_score = Math.max(0, Math.min(100, Number(req.body.default_min_score)));
+  if (req.body?.gemini_model) patch.gemini_model = String(req.body.gemini_model);
+  res.json(await settings.set(patch));
+});
 
 // ── Niches ────────────────────────────────────────────────────────────────
 router.get('/niches', async (req, res) => {
@@ -153,7 +164,10 @@ router.get('/leads/:id', async (req, res) => {
     }
   }
 
-  res.json({ lead, events, media, notes, designSystem });
+  const threshold = await settings.minScoreFor(lead);
+  const effectiveScore = lead.score_override ?? lead.audit_score ?? null;
+
+  res.json({ lead, events, media, notes, designSystem, threshold, effectiveScore });
 });
 
 // Upload / replace a lead asset. Body: { kind: 'screenshot'|'logo', filename, dataBase64 }
@@ -206,6 +220,50 @@ router.patch('/leads/:id', async (req, res) => {
     });
   }
   res.json(updated);
+});
+
+// Approve a waiting_approval lead -> build the pitch PDF (Phase D worker).
+router.post('/leads/:id/approve', async (req, res) => {
+  const [lead] = await store.q(`SELECT * FROM leads WHERE id = $1`, [req.params.id]);
+  if (!lead) return res.status(404).json({ error: 'Lead not found' });
+  if (lead.status !== 'waiting_approval') {
+    return res.status(400).json({ error: `lead is ${lead.status}, expected waiting_approval` });
+  }
+  await store.updateLead(lead.id, {
+    status: 'building_pdf',
+    approved_at: new Date().toISOString(),
+    approved_by: req.user?.email || 'admin',
+  });
+  await store.recordEvent(lead.id, lead.status, 'building_pdf', { by: req.user?.email || 'admin' });
+  res.json({ ok: true, status: 'building_pdf' });
+});
+
+// Reject a lead during review.
+router.post('/leads/:id/reject', async (req, res) => {
+  const [lead] = await store.q(`SELECT * FROM leads WHERE id = $1`, [req.params.id]);
+  if (!lead) return res.status(404).json({ error: 'Lead not found' });
+  await store.updateLead(lead.id, {
+    status: 'disqualified',
+    qualify_decision: 'rejected',
+    disqualify_reason: (req.body?.reason || 'manual reject').slice(0, 300),
+  });
+  await store.recordEvent(lead.id, lead.status, 'disqualified', { by: req.user?.email || 'admin', reason: req.body?.reason });
+  res.json({ ok: true, status: 'disqualified' });
+});
+
+// Manually override the opportunity score, then re-route.
+router.post('/leads/:id/score', async (req, res) => {
+  const score = Number(req.body?.score);
+  if (!Number.isInteger(score) || score < 0 || score > 100) {
+    return res.status(400).json({ error: 'score must be an integer 0-100' });
+  }
+  const [lead] = await store.q(`SELECT * FROM leads WHERE id = $1`, [req.params.id]);
+  if (!lead) return res.status(404).json({ error: 'Lead not found' });
+  await store.updateLead(lead.id, { score_override: score, score_override_by: req.user?.email || 'admin' });
+  await store.recordEvent(lead.id, lead.status, lead.status, { score_override: score, by: req.user?.email || 'admin' });
+  const [fresh] = await store.q(`SELECT * FROM leads WHERE id = $1`, [req.params.id]);
+  const routed = await reevaluate(fresh);
+  res.json({ ok: true, score_override: score, ...routed });
 });
 
 // Re-run scrape + audit on one lead.

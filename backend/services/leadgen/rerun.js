@@ -9,6 +9,7 @@
 const store = require('./store');
 const { scrapeLead } = require('./scrapeWorker');
 const { auditLead } = require('./audit');
+const { qualifyLead } = require('./qualify');
 
 let running = false;
 const queue = [];
@@ -29,6 +30,10 @@ async function drain() {
       const [afterScrape] = await store.q(`SELECT * FROM leads WHERE id = $1`, [id]);
       await store.setStatus(id, 'auditing');
       await auditLead({ ...afterScrape, status: afterScrape.status });
+
+      const [afterAudit] = await store.q(`SELECT * FROM leads WHERE id = $1`, [id]);
+      await store.setStatus(id, 'qualifying');
+      await qualifyLead({ ...afterAudit, status: 'qualifying' });
     } catch (err) {
       console.error(`[rerun] lead ${id} failed:`, err.message);
       const [lead] = await store.q(`SELECT * FROM leads WHERE id = $1`, [id]);

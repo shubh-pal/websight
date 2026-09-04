@@ -14,6 +14,7 @@ import AdminContacts from './pages/AdminContacts';
 import LeadsPipeline from './pages/admin/LeadsPipeline';
 import LeadDetail from './pages/admin/LeadDetail';
 import Niches from './pages/admin/Niches';
+import Qualify from './pages/admin/Qualify';
 
 import ProtectedRoute from './components/ProtectedRoute';
 import AdminProtectedRoute from './components/AdminProtectedRoute';
@@ -74,6 +75,7 @@ export default function App() {
         <Route path="/admin/leads" element={<AdminProtectedRoute><LeadsPipeline /></AdminProtectedRoute>} />
         <Route path="/admin/leads/:id" element={<AdminProtectedRoute><LeadDetail /></AdminProtectedRoute>} />
         <Route path="/admin/niches" element={<AdminProtectedRoute><Niches /></AdminProtectedRoute>} />
+        <Route path="/admin/qualify" element={<AdminProtectedRoute><Qualify /></AdminProtectedRoute>} />
 
         {/* /app alias for the agency pipeline */}
         <Route path="/app" element={<AdminProtectedRoute><LeadsPipeline /></AdminProtectedRoute>} />

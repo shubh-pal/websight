@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import AdminLayout, { adminStyles } from '../../components/AdminLayout';
 
 const API = '/api/app/leadgen';
-const BLANK = { name: '', search_terms: '', locations: '[\n  { "country": "US", "cities": ["Austin, TX"] }\n]' };
+const BLANK = { name: '', search_terms: '', locations: '[\n  { "country": "US", "cities": ["Austin, TX"] }\n]', min_score: '' };
 
 export default function Niches() {
   const [niches, setNiches] = useState([]);
@@ -12,22 +12,36 @@ export default function Niches() {
   const [editing, setEditing] = useState(null); // niche id or 'new'
   const [form, setForm] = useState(BLANK);
   const [sortKey, setSortKey] = useState('leads');
+  const [settings, setSettings] = useState(null);
+  const [minScore, setMinScore] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [n, s] = await Promise.all([
+      const [n, s, cfg] = await Promise.all([
         fetch(`${API}/niches?all=1`, { credentials: 'include' }).then((r) => r.json()),
         fetch(`${API}/niches/stats`, { credentials: 'include' }).then((r) => r.json()),
+        fetch(`${API}/settings`, { credentials: 'include' }).then((r) => r.json()),
       ]);
       setNiches(n);
       setStats(Array.isArray(s) ? s : []);
+      setSettings(cfg);
+      setMinScore(String(cfg.default_min_score ?? 30));
     } catch {
       setError('Failed to load');
     } finally {
       setLoading(false);
     }
   }, []);
+
+  async function saveMinScore() {
+    const res = await fetch(`${API}/settings`, {
+      method: 'PUT', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ default_min_score: Number(minScore) }),
+    });
+    if (res.ok) { setSettings(await res.json()); alert('Saved'); }
+  }
   useEffect(() => { load(); }, [load]);
 
   const sortedStats = useMemo(() => {
@@ -42,6 +56,7 @@ export default function Niches() {
       name: n.name,
       search_terms: (n.search_terms || []).join(', '),
       locations: JSON.stringify(n.locations || [], null, 2),
+      min_score: n.min_score ?? '',
     });
     setEditing(n.id);
   }
@@ -54,6 +69,7 @@ export default function Niches() {
       name: form.name.trim(),
       search_terms: form.search_terms.split(',').map((s) => s.trim()).filter(Boolean),
       locations,
+      min_score: form.min_score === '' ? null : Number(form.min_score),
     };
     if (!body.name || !body.search_terms.length) { alert('Name and at least one search term required'); return; }
     const res = await fetch(
@@ -87,6 +103,19 @@ export default function Niches() {
       actions={<button onClick={() => startEdit('new')} style={btn.primary}>+ New niche</button>}
     >
       {error ? <div style={adminStyles.errorCard}>{error}</div> : null}
+
+      <section style={{ ...adminStyles.tableSection, marginTop: 0 }}>
+        <h2 style={adminStyles.tableSectionTitle}>Qualification threshold</h2>
+        <p style={{ ...adminStyles.tableSectionMeta, margin: '6px 0 12px' }}>
+          A lead qualifies for the approval queue when its (effective) opportunity score is <strong>above</strong> this.
+          Niches can override it individually.
+        </p>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <span style={{ fontSize: 13, color: '#94a3b8' }}>Global default min score</span>
+          <input type="number" value={minScore} onChange={(e) => setMinScore(e.target.value)} style={{ ...miniSelect, width: 70 }} />
+          <button onClick={saveMinScore} style={btn.primary}>Save</button>
+        </div>
+      </section>
 
       <section style={adminStyles.tableSection}>
         <div style={adminStyles.tableSectionHeader}>
@@ -134,6 +163,7 @@ export default function Niches() {
                 <div>
                   <strong style={{ fontSize: 15 }}>{n.name}</strong>{!n.active ? <span style={sub}> · inactive</span> : null}
                   <div style={{ ...sub, marginTop: 4 }}>{n.search_terms.join(' · ')}</div>
+                  <div style={{ ...sub, marginTop: 2 }}>min score: {n.min_score ?? 'global default'}</div>
                   <div style={{ ...sub, marginTop: 2 }}>
                     {(n.locations || []).map((l) => `${l.country}: ${(l.cities || []).length} cities`).join('  |  ')}
                   </div>
@@ -159,6 +189,7 @@ function NicheForm({ form, setForm, onSave, onCancel, isNew }) {
       <input placeholder="Name" value={form.name} onChange={f('name')} style={input} />
       <input placeholder="Search terms, comma separated" value={form.search_terms} onChange={f('search_terms')} style={input} />
       <textarea placeholder="Locations JSON" value={form.locations} onChange={f('locations')} rows={6} style={{ ...input, fontFamily: 'monospace', fontSize: 12 }} />
+      <input placeholder="Min score override (blank = use global default)" value={form.min_score} onChange={f('min_score')} style={input} />
       <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
         <button onClick={onSave} style={btn.primary}>Save</button>
         <button onClick={onCancel} style={btn.tiny}>Cancel</button>

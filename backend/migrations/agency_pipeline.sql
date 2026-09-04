@@ -121,6 +121,24 @@ ALTER TABLE leads     ADD COLUMN IF NOT EXISTS niche_id UUID REFERENCES niches(i
 ALTER TABLE lead_runs ADD COLUMN IF NOT EXISTS niche_id UUID REFERENCES niches(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS leads_niche_idx ON leads(niche_id);
 
+-- Per-niche minimum opportunity score (NULL -> use the global default).
+ALTER TABLE niches ADD COLUMN IF NOT EXISTS min_score INTEGER;
+
+-- Approval / qualification bookkeeping.
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS approved_at   TIMESTAMPTZ;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS approved_by   TEXT;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS disqualify_reason TEXT;
+
+-- Global key/value settings (single-row semantics per key).
+CREATE TABLE IF NOT EXISTS app_settings (
+  key        TEXT PRIMARY KEY,
+  value      JSONB NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+INSERT INTO app_settings (key, value) VALUES
+  ('pipeline', '{"default_min_score": 30, "gemini_model": "vertex-gemini-2.5-flash"}'::jsonb)
+ON CONFLICT (key) DO NOTHING;
+
 -- Manually uploaded / overridden assets: { "screenshot": "<gcs key>", "logo": "<gcs key>" }
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS manual_assets JSONB NOT NULL DEFAULT '{}'::jsonb;
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS score_override INTEGER;      -- set on manual review
