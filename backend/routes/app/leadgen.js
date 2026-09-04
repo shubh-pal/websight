@@ -6,6 +6,7 @@ const express = require('express');
 const { runDiscovery } = require('../../services/leadgen/discover');
 const { DEFAULT_GRID } = require('../../services/leadgen/config');
 const store = require('../../services/leadgen/store');
+const gcs = require('../../services/gcsStorage');
 
 const router = express.Router();
 
@@ -60,7 +61,48 @@ router.get('/leads/:id', async (req, res) => {
     `SELECT * FROM lead_events WHERE lead_id = $1 ORDER BY created_at DESC LIMIT 100`,
     [req.params.id]
   );
-  res.json({ lead, events });
+
+  const media = {};
+  if (gcs.isEnabled) {
+    const shotKey = lead.audit_signals?.screenshot;
+    try {
+      if (shotKey) media.beforeScreenshot = await gcs.getSignedDownloadUrl(shotKey, 3600);
+      if (lead.mockup_gcs_key) media.mockup = await gcs.getSignedDownloadUrl(lead.mockup_gcs_key, 3600);
+      if (lead.proposal_gcs_key) media.proposalPdf = await gcs.getSignedDownloadUrl(lead.proposal_gcs_key, 3600);
+    } catch (err) {
+      media.error = `signed URL failed: ${err.message}`;
+    }
+  }
+
+  res.json({ lead, events, media });
+});
+
+// Close a lead from ANY stage — terminal, excluded from all pipeline ticks.
+router.post('/leads/:id/close', async (req, res) => {
+  const [lead] = await store.q(`SELECT * FROM leads WHERE id = $1`, [req.params.id]);
+  if (!lead) return res.status(404).json({ error: 'Lead not found' });
+  if (lead.status === 'closed') return res.json({ ok: true, status: 'closed' });
+  await store.updateLead(lead.id, {
+    status: 'closed',
+    hold_reason: (req.body?.reason || '').slice(0, 300) || null,
+  });
+  await store.recordEvent(lead.id, lead.status, 'closed', {
+    by: req.user?.email || 'admin',
+    reason: req.body?.reason || null,
+  });
+  res.json({ ok: true, status: 'closed', from: lead.status });
+});
+
+// Re-open a closed lead back to a chosen stage (default: discovered).
+router.post('/leads/:id/reopen', async (req, res) => {
+  const [lead] = await store.q(`SELECT * FROM leads WHERE id = $1`, [req.params.id]);
+  if (!lead) return res.status(404).json({ error: 'Lead not found' });
+  if (lead.status !== 'closed') return res.status(400).json({ error: 'Lead is not closed' });
+  const allowed = ['discovered', 'scraped', 'audited', 'qualified'];
+  const to = allowed.includes(req.body?.to) ? req.body.to : 'discovered';
+  await store.updateLead(lead.id, { status: to, hold_reason: null, error: null, error_stage: null });
+  await store.recordEvent(lead.id, 'closed', to, { by: req.user?.email || 'admin', reopened: true });
+  res.json({ ok: true, status: to });
 });
 
 // Re-queue an errored lead to the start of the stage that failed.

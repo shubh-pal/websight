@@ -11,6 +11,8 @@ import AdminLogin from './pages/AdminLogin';
 import AdminUsers from './pages/AdminUsers';
 import AdminWebsites from './pages/AdminWebsites';
 import AdminContacts from './pages/AdminContacts';
+import LeadsPipeline from './pages/admin/LeadsPipeline';
+import LeadDetail from './pages/admin/LeadDetail';
 
 import ProtectedRoute from './components/ProtectedRoute';
 import AdminProtectedRoute from './components/AdminProtectedRoute';
@@ -68,6 +70,12 @@ export default function App() {
         <Route path="/admin/websites" element={<AdminProtectedRoute><AdminWebsites /></AdminProtectedRoute>} />
         <Route path="/admin/websites/:jobId" element={<AdminProtectedRoute><Result /></AdminProtectedRoute>} />
         <Route path="/admin/contacts" element={<AdminProtectedRoute><AdminContacts /></AdminProtectedRoute>} />
+        <Route path="/admin/leads" element={<AdminProtectedRoute><LeadsPipeline /></AdminProtectedRoute>} />
+        <Route path="/admin/leads/:id" element={<AdminProtectedRoute><LeadDetail /></AdminProtectedRoute>} />
+
+        {/* /app alias for the agency pipeline */}
+        <Route path="/app" element={<AdminProtectedRoute><LeadsPipeline /></AdminProtectedRoute>} />
+        <Route path="/app/leads/:id" element={<AdminProtectedRoute><LeadDetail /></AdminProtectedRoute>} />
       </Routes>
     </AuthProvider>
   );

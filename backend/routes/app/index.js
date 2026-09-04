@@ -1,9 +1,9 @@
 /**
  * /api/app/* — internal agency pipeline API.
  *
- * Admin-session gated (same gate as /api/admin). Automation sub-routes
- * (/cron, /webhooks) use their own X-Cron-Secret guard and are mounted
- * OUTSIDE the admin guard.
+ * Admin-session gated (same gate as /api/admin), except the automation
+ * endpoints (/cron/*, /webhooks/*) which use an X-Cron-Secret guard so
+ * Cloud Scheduler / ESP webhooks can reach them without a session.
  *
  * None of this is reachable from the public product UI.
  */
@@ -16,11 +16,8 @@ const pipeline = require('../../services/leadgen/pipeline');
 
 const router = express.Router();
 
-// ── Automation endpoints (no session; shared-secret) ────────────────────────
-const automation = express.Router();
-automation.use(requireCronSecret);
-
-automation.post('/cron/tick', async (req, res) => {
+// ── Automation endpoints (shared-secret, no session) ───────────────────────
+router.post('/cron/tick', requireCronSecret, async (req, res) => {
   try {
     const advanced = await pipeline.tick(req.body?.limits || {});
     res.json({ ok: true, advanced });
@@ -29,8 +26,7 @@ automation.post('/cron/tick', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
-router.use(automation);
+// Phase E: router.post('/webhooks/esp', requireCronSecret, ...);
 
 // ── Admin-gated endpoints ──────────────────────────────────────────────────
 router.use(requireAdmin);
@@ -43,8 +39,13 @@ router.get('/ping', (req, res) => {
   });
 });
 
+// Everything below needs Postgres.
+router.use((req, res, next) => {
+  if (!db.pool) return res.status(503).json({ error: 'Database not configured (DATABASE_URL unset)' });
+  next();
+});
+
 router.get('/pipeline/summary', async (req, res) => {
-  if (!db.pool) return res.status(503).json({ error: 'Database not initialized' });
   try {
     const { rows } = await db.query(
       `SELECT status, COUNT(*)::int AS count FROM leads GROUP BY status ORDER BY count DESC`
