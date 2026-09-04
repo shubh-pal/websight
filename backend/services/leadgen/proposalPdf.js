@@ -35,6 +35,21 @@ function mediaImg(url) {
     : `<div class="placeholder" style="width:100%;height:100%"><span>no image yet</span></div>`;
 }
 
+/** A screenshot/mockup shown inside a browser-window frame — reads as an
+ * intentional device mockup rather than a raw, arbitrarily-cropped image. */
+function browserFrame(url, tagLabel, tagSub) {
+  return `<div class="frame-wrap">
+    ${tagLabel ? `<div class="frame-tag"><span class="n serif">${esc(tagLabel)}</span><span class="mono">${esc(tagSub || '')}</span></div>` : ''}
+    <div class="browser-frame">
+      <div class="chrome">
+        <div class="dot" style="background:#ef4444"></div><div class="dot" style="background:#eab308"></div><div class="dot" style="background:#22c55e"></div>
+        <div class="url-bar"></div>
+      </div>
+      <div class="content">${mediaImg(url)}</div>
+    </div>
+  </div>`;
+}
+
 function renderHtml({ lead, company, designSystem, mockup, before }) {
   const colors = designSystem?.colors || {};
   const fonts = designSystem?.fonts || {};
@@ -70,16 +85,24 @@ function renderHtml({ lead, company, designSystem, mockup, before }) {
     .split-slide { display: flex; height: 100%; }
     .split-text { flex: 0 0 44%; padding: 56px 52px; display: flex; flex-direction: column; justify-content: flex-end; color: #fff; position: relative; }
     .split-text h1 { font-size: 42px; line-height: 1.1; color: #fff; }
-    .split-image { flex: 1; position: relative; background: #e7e5e0; overflow: hidden; }
-    .split-image img { width: 100%; height: 100%; object-fit: contain; display: block; } .split-image .placeholder { width: 100%; height: 100%; }
+    .split-image { flex: 1; position: relative; background: #ded9cc; overflow: hidden; }
     .wordmark { position: absolute; top: 40px; left: 52px; z-index: 3; font-family: 'Fraunces', serif; font-weight: 600; font-size: 17px; color: #fff; }
 
-    .filmstrip { display: flex; height: 100%; align-items: stretch; }
-    .filmstrip .panel { flex: 1; position: relative; background: #e7e5e0; }
-    .filmstrip .panel img { width: 100%; height: 100%; object-fit: contain; } .filmstrip .panel .placeholder { width: 100%; height: 100%; }
-    .filmstrip .caption { position: absolute; top: 20px; left: 20px; z-index: 3; background: rgba(20,17,15,0.85); padding: 8px 16px; border-radius: 999px; display: flex; align-items: baseline; gap: 8px; }
-    .filmstrip .caption .mono { font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; font-family: 'Inter'; color: rgba(255,255,255,0.65); }
-    .filmstrip .caption .n { font-family: 'Fraunces', serif; font-size: 15px; color: #fff; }
+    /* Browser-window mockup frame — screenshots read as an intentional
+       device mockup instead of a raw, arbitrarily-cropped image. */
+    .frame-wrap { height: 100%; box-sizing: border-box; padding: 40px; display: flex; align-items: center; justify-content: center; position: relative; }
+    .browser-frame { width: 100%; height: 100%; border-radius: 16px; overflow: hidden; background: #fff; box-shadow: 0 30px 70px rgba(0,0,0,0.32); display: flex; flex-direction: column; }
+    .browser-frame .chrome { background: #1c1917; padding: 11px 16px; display: flex; align-items: center; gap: 7px; flex-shrink: 0; }
+    .browser-frame .dot { width: 9px; height: 9px; border-radius: 50%; }
+    .browser-frame .url-bar { flex: 1; height: 17px; background: rgba(255,255,255,0.14); border-radius: 999px; margin-left: 8px; }
+    .browser-frame .content { flex: 1; position: relative; overflow: hidden; background: #f1f0ec; }
+    .browser-frame .content img { width: 100%; height: 100%; object-fit: cover; object-position: top; display: block; }
+    .frame-tag { position: absolute; top: 22px; left: 22px; z-index: 4; background: rgba(20,17,15,0.88); padding: 7px 15px; border-radius: 999px; display: flex; align-items: baseline; gap: 7px; }
+    .frame-tag .n { font-family: 'Fraunces', serif; font-size: 14px; color: #fff; }
+    .frame-tag .mono { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; font-family: 'Inter'; color: rgba(255,255,255,0.65); }
+
+    .filmstrip { display: flex; height: 100%; align-items: stretch; background: #ded9cc; }
+    .filmstrip .panel { flex: 1; position: relative; }
     .filmstrip .divider-arrow { width: 56px; background: #1c1917; display: flex; align-items: center; justify-content: center; color: #faf9f6; font-size: 20px; z-index: 3; flex-shrink: 0; }
 
     .palette-strip { display: flex; height: 90px; border-radius: 4px; overflow: hidden; margin-top: 26px; }
@@ -103,23 +126,17 @@ function renderHtml({ lead, company, designSystem, mockup, before }) {
         <h1 class="serif">${esc(headline)}</h1>
         <p style="color:rgba(255,255,255,0.65);margin-top:16px">${esc(lead.category || '')}${lead.category ? ' &mdash; ' : ''}prepared exclusively for ${esc(lead.name)}.</p>
       </div>
-      <div class="split-image">${mediaImg(mockup)}</div>
+      <div class="split-image">${browserFrame(mockup)}</div>
     </div>
     <div class="page-num on-dark">01 / 05</div>
   </div>
 
-  <!-- 2/5 Before/After filmstrip — both images shown true color, side by side -->
+  <!-- 2/5 Before/After filmstrip — both shown in a browser mockup, side by side -->
   <div class="slide">
     <div class="filmstrip">
-      <div class="panel">
-        ${mediaImg(before)}
-        <div class="caption"><span class="n serif">Before</span><span class="mono">current site</span></div>
-      </div>
+      <div class="panel">${browserFrame(before, 'Before', 'current site')}</div>
       <div class="divider-arrow">&rarr;</div>
-      <div class="panel">
-        ${mediaImg(mockup)}
-        <div class="caption"><span class="n serif">After</span><span class="mono">the redesign</span></div>
-      </div>
+      <div class="panel">${browserFrame(mockup, 'After', 'the redesign')}</div>
     </div>
     <div class="page-num">02 / 05</div>
   </div>
@@ -169,7 +186,7 @@ function renderHtml({ lead, company, designSystem, mockup, before }) {
   <!-- 5/5 Close — mirrors the cover: full-clarity image, text never over it -->
   <div class="slide">
     <div class="split-slide">
-      <div class="split-image">${mediaImg(mockup)}</div>
+      <div class="split-image">${browserFrame(mockup)}</div>
       <div class="split-text" style="background:linear-gradient(195deg, ${accent}, #1c1917); align-items:flex-start">
         <div class="kicker" style="color:rgba(255,255,255,0.6)">Ready when you are</div>
         <h1 class="serif" style="font-size:36px">Let's give ${esc(lead.name)} a site worthy of the work you already do.</h1>
