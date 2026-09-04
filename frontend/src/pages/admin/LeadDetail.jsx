@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useParams, useNavigate } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import AdminLayout, { adminStyles } from '../../components/AdminLayout';
 import { StageBadge } from './pipelineShared';
 
 const API = '/api/app/leadgen';
+const MOCKUP_INELIGIBLE = ['discovered', 'scraping', 'scraped', 'auditing', 'qualifying', 'waiting_approval', 'disqualified', 'closed'];
 
 export default function LeadDetail() {
   const { id } = useParams();
-  const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -15,6 +15,8 @@ export default function LeadDetail() {
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({});
   const [noteText, setNoteText] = useState('');
+  const [lightbox, setLightbox] = useState(null); // { src, label }
+  const [showPdf, setShowPdf] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -32,7 +34,7 @@ export default function LeadDetail() {
   useEffect(() => { load(); }, [load]);
 
   async function call(method, path, body, confirmMsg) {
-    if (confirmMsg && !window.confirm(confirmMsg)) return;
+    if (confirmMsg && !window.confirm(confirmMsg)) return false;
     setBusy(true);
     try {
       const res = await fetch(`${API}/leads/${id}${path}`, {
@@ -88,6 +90,7 @@ export default function LeadDetail() {
   const ds = designSystem || {};
   const dsColors = ds.colors || {};
   const dsFonts = ds.fonts || {};
+  const canUploadMockup = !MOCKUP_INELIGIBLE.includes(lead.status);
 
   return (
     <AdminLayout
@@ -106,13 +109,14 @@ export default function LeadDetail() {
         </>
       }
     >
-      <div style={{ display: 'flex', gap: 10, alignItems: 'center', margin: '4px 0 20px' }}>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', margin: '4px 0 20px', flexWrap: 'wrap' }}>
         <StageBadge status={lead.status} />
         {lead.error ? <span style={{ color: '#fca5a5', fontSize: 13 }}>{lead.error_stage}: {lead.error}</span> : null}
         {lead.hold_reason ? <span style={{ color: '#94a3b8', fontSize: 13 }}>closed: {lead.hold_reason}</span> : null}
       </div>
 
-      <div style={grid}>
+      {/* Row 1 — core info */}
+      <div style={grid3}>
         <Card title="Business" action={
           editing
             ? <span><button onClick={saveEdit} disabled={busy} style={miniBtn}>Save</button> <button onClick={() => setEditing(false)} style={miniBtn}>Cancel</button></span>
@@ -166,130 +170,153 @@ export default function LeadDetail() {
               </>
             : <div style={{ color: '#94a3b8' }}>not qualified yet</div>}
         </Card>
+      </div>
 
-        <Card title="Assets">
-          {/* Screenshot */}
-          <div style={assetBlock}>
-            <div style={assetHead}>
-              <span>Current site screenshot {media.screenshotIsManual ? <em style={tag}>manual</em> : media.beforeScreenshot ? <em style={tag}>scraped</em> : null}</span>
-              <span>
-                <UploadBtn label={media.beforeScreenshot ? 'Replace' : 'Upload'} accept="image/*" onFile={(f) => uploadAsset('screenshot', f)} />
-                {media.screenshotIsManual ? <button onClick={() => call('DELETE', '/asset/screenshot')} style={miniBtn}>revert</button> : null}
-              </span>
-            </div>
-            {media.beforeScreenshot
-              ? <a href={media.beforeScreenshot} target="_blank" rel="noreferrer"><img src={media.beforeScreenshot} alt="screenshot" style={assetImg} /></a>
-              : <div style={assetEmpty}>no screenshot — upload one</div>}
+      {/* Row 2 — visuals: current site, redesign, brand system */}
+      <div style={{ ...grid3, marginTop: 16 }}>
+        <Card title="Current site" action={
+          <span>
+            <UploadBtn label={media.beforeScreenshot ? 'Replace' : 'Upload'} accept="image/*" onFile={(f) => uploadAsset('screenshot', f)} />
+            {media.screenshotIsManual ? <button onClick={() => call('DELETE', '/asset/screenshot')} style={miniBtn}>revert</button> : null}
+          </span>
+        }>
+          <Thumb
+            src={media.beforeScreenshot} alt="Current site screenshot"
+            empty="no screenshot — upload one"
+            onClick={() => media.beforeScreenshot && setLightbox({ src: media.beforeScreenshot, label: 'Current site' })}
+          />
+          {media.beforeScreenshot ? <div style={{ ...sub, marginTop: 6 }}>{media.screenshotIsManual ? 'manual' : 'scraped'} · click to enlarge</div> : null}
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 16, marginBottom: 8 }}>
+            <span style={{ fontSize: 13, color: '#cbd5e1' }}>Logo {!media.logo ? <em style={{ ...tag, color: '#fca5a5', borderColor: '#fca5a5' }}>required</em> : null}</span>
+            <span>
+              <UploadBtn label={media.logo ? 'Replace' : 'Upload'} accept="image/*" onFile={(f) => uploadAsset('logo', f)} />
+              {media.logoIsManual ? <button onClick={() => call('DELETE', '/asset/logo')} style={miniBtn}>revert</button> : null}
+            </span>
           </div>
+          <Thumb
+            src={media.logo} alt="Logo" contain height={90}
+            empty={media.logoSourceUrl ? 'found a logo URL but could not mirror it — upload manually' : 'no logo — upload one'}
+            onClick={() => media.logo && setLightbox({ src: media.logo, label: 'Logo' })}
+          />
+        </Card>
 
-          {/* Logo — always shown */}
-          <div style={assetBlock}>
-            <div style={assetHead}>
-              <span>Logo {media.logoIsManual ? <em style={tag}>manual</em> : media.logo ? <em style={tag}>scraped</em> : <em style={{ ...tag, color: '#fca5a5', borderColor: '#fca5a5' }}>required</em>}</span>
-              <span>
-                <UploadBtn label={media.logo ? 'Replace' : 'Upload'} accept="image/*" onFile={(f) => uploadAsset('logo', f)} />
-                {media.logoIsManual ? <button onClick={() => call('DELETE', '/asset/logo')} style={miniBtn}>revert</button> : null}
-              </span>
-            </div>
-            {media.logo
-              ? <a href={media.logo} target="_blank" rel="noreferrer"><img src={media.logo} alt="logo" style={{ ...assetImg, maxHeight: 90, objectFit: 'contain', background: '#fff', padding: 8 }} /></a>
-              : <div style={assetEmpty}>{media.logoSourceUrl ? 'scrape found a logo URL but could not mirror it — upload manually' : 'no logo — upload one'}</div>}
-          </div>
+        <Card title="Redesign" action={
+          canUploadMockup ? (
+            <span>
+              <UploadBtn label={media.mockup ? 'Replace' : 'Upload'} accept="image/*" onFile={(f) => uploadAsset('mockup', f)} />
+            </span>
+          ) : null
+        }>
+          <Thumb
+            src={media.mockup} alt="Redesign mockup"
+            empty={canUploadMockup ? 'no design yet — upload one, or pull the brief via the design MCP' : 'not approved yet — nothing to upload'}
+            onClick={() => media.mockup && setLightbox({ src: media.mockup, label: 'Redesign mockup' })}
+          />
+          {media.mockup ? <div style={{ ...sub, marginTop: 6 }}>click to enlarge · replacing rebuilds the proposal automatically</div> : null}
+        </Card>
 
-          {/* Design system */}
-          <div style={assetBlock}>
-            <div style={assetHead}>
-              <span>Design system {ds.category ? <em style={tag}>{ds.category}</em> : null}</span>
-              {media.designSystemJson ? <a href={media.designSystemJson} target="_blank" rel="noreferrer" style={{ ...miniBtn, textDecoration: 'none' }}>raw JSON</a> : null}
-            </div>
-            {Object.keys(dsColors).length ? (
-              <>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
-                  {Object.entries(dsColors).filter(([, v]) => v).map(([name, hex]) => (
-                    <div key={name} title={`${name}: ${hex}`} style={{ textAlign: 'center' }}>
-                      <div style={{ width: 40, height: 40, borderRadius: 8, background: hex, border: '1px solid rgba(148,163,184,0.3)' }} />
-                      <div style={{ ...sub, fontSize: 10 }}>{name}</div>
-                    </div>
-                  ))}
-                </div>
-                <div style={sub}>
-                  Fonts — heading: <strong style={{ color: '#cbd5e1' }}>{dsFonts.heading || '—'}</strong>, body: <strong style={{ color: '#cbd5e1' }}>{dsFonts.body || '—'}</strong>
-                </div>
-              </>
-            ) : <div style={assetEmpty}>{lead.gcs_prefix ? 'design system not parsed' : 'not scraped yet'}</div>}
-          </div>
-
-          {/* Redesign mockup — the paid step. Upload here or via the design MCP. */}
-          {['building_pdf', 'ui_generated', 'queued_for_mail', 'contacted', 'replied'].includes(lead.status) || media.mockup ? (
-            <div style={assetBlock}>
-              <div style={assetHead}>
-                <span>Redesign mockup</span>
-                {['building_pdf', 'ui_generated', 'error'].includes(lead.status) ? (
-                  <UploadBtn label={media.mockup ? 'Replace' : 'Upload'} accept="image/*" onFile={(f) => uploadAsset('mockup', f)} />
-                ) : null}
+        <Card title="Brand system" action={
+          media.designSystemJson ? <a href={media.designSystemJson} target="_blank" rel="noreferrer" style={{ ...miniBtn, textDecoration: 'none' }}>raw JSON</a> : null
+        }>
+          {ds.category ? <div style={{ ...sub, marginBottom: 10 }}>{ds.category}</div> : null}
+          {Object.keys(dsColors).length ? (
+            <>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+                {Object.entries(dsColors).filter(([, v]) => v).map(([name, hex]) => (
+                  <div key={name} title={`${name}: ${hex}`} style={{ textAlign: 'center' }}>
+                    <div style={{ width: 36, height: 36, borderRadius: 8, background: hex, border: '1px solid rgba(148,163,184,0.3)' }} />
+                    <div style={{ ...sub, fontSize: 10 }}>{name}</div>
+                  </div>
+                ))}
               </div>
-              {media.mockup
-                ? <a href={media.mockup} target="_blank" rel="noreferrer"><img src={media.mockup} alt="mockup" style={assetImg} /></a>
-                : <div style={assetEmpty}>waiting on a design — generate one from the brief (design MCP, or the audit/screenshot above) and upload it here</div>}
-            </div>
-          ) : null}
-
-          {media.proposalPdf ? <a href={media.proposalPdf} target="_blank" rel="noreferrer" style={{ ...btn.secondary, display: 'inline-block', marginTop: 10 }}>Open proposal PDF</a> : null}
-          {lead.mockup_gcs_key ? (
-            <button onClick={() => action('rebuild-proposal', null, media.proposalPdf ? 'Rebuild the proposal PDF from the current mockup, lead data, and agency settings?' : null)} disabled={busy} style={{ ...btn.secondary, marginTop: 10, marginLeft: media.proposalPdf ? 8 : 0 }}>
-              {media.proposalPdf ? 'Rebuild proposal' : 'Build proposal'}
-            </button>
-          ) : null}
-          {lead.gcs_prefix ? <div style={{ ...sub, marginTop: 8 }}>GCS: {lead.gcs_prefix}</div> : null}
+              <div style={sub}>
+                Fonts — heading: <strong style={{ color: '#cbd5e1' }}>{dsFonts.heading || '—'}</strong>, body: <strong style={{ color: '#cbd5e1' }}>{dsFonts.body || '—'}</strong>
+              </div>
+            </>
+          ) : <div style={assetEmpty}>{lead.gcs_prefix ? 'design system not parsed' : 'not scraped yet'}</div>}
+          {lead.gcs_prefix ? <div style={{ ...sub, marginTop: 14 }}>GCS: {lead.gcs_prefix}</div> : null}
         </Card>
       </div>
 
-      <Card title={`Notes${notes.length ? ` (${notes.length})` : ''}`}>
-        <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-          <textarea
-            value={noteText}
-            onChange={(e) => setNoteText(e.target.value)}
-            placeholder="Add a note…"
-            rows={2}
-            style={{ ...editInput, flex: 1, resize: 'vertical' }}
-          />
-          <button onClick={addNote} disabled={busy || !noteText.trim()} style={btn.secondary}>Add</button>
-        </div>
-        <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
-          {notes.map((n) => (
-            <li key={n.id} style={{ padding: '8px 0', borderBottom: '1px solid rgba(148,163,184,0.08)', fontSize: 13 }}>
-              <div style={{ color: '#e2e8f0', whiteSpace: 'pre-wrap' }}>{n.body}</div>
-              <div style={{ ...sub, marginTop: 3 }}>
-                {n.author || 'admin'} · {new Date(n.created_at).toLocaleString()}
-                {' · '}
-                <button onClick={() => call('DELETE', `/notes/${n.id}`)} style={{ ...miniBtn, padding: '1px 6px' }}>delete</button>
-              </div>
-            </li>
-          ))}
-          {notes.length === 0 ? <li style={{ color: '#94a3b8' }}>no notes yet</li> : null}
-        </ul>
-      </Card>
+      {/* Row 3 — the pitch PDF, its own section */}
+      <div style={{ marginTop: 16 }}>
+        <Card title="Proposal PDF">
+          {media.proposalPdf ? (
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+              <button onClick={() => setShowPdf(true)} style={btn.primary}>Preview</button>
+              <a href={media.proposalPdf} target="_blank" rel="noreferrer" style={btn.secondary}>Open in new tab</a>
+              <button
+                onClick={() => action('rebuild-proposal', null, 'Rebuild the proposal PDF from the current mockup, lead data, and agency settings?')}
+                disabled={busy} style={btn.secondary}
+              >
+                Rebuild
+              </button>
+              <span style={sub}>reflects the current mockup + agency settings</span>
+            </div>
+          ) : lead.mockup_gcs_key ? (
+            <>
+              <p style={{ fontSize: 13.5, marginBottom: 12 }}>A redesign mockup is ready — build the pitch deck whenever you want.</p>
+              <button onClick={() => action('rebuild-proposal')} disabled={busy} style={btn.primary}>Build proposal</button>
+            </>
+          ) : (
+            <div style={assetEmpty}>Upload a redesign mockup above first — the proposal builds automatically once one exists.</div>
+          )}
+        </Card>
+      </div>
 
-      <Card title="Timeline">
-        <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
-          {events.map((e) => (
-            <li key={e.id} style={{ display: 'flex', gap: 12, padding: '8px 0', borderBottom: '1px solid rgba(148,163,184,0.08)', fontSize: 13 }}>
-              <span style={{ color: '#64748b', minWidth: 130 }}>{new Date(e.created_at).toLocaleString()}</span>
-              <span style={{ color: '#e2e8f0' }}>{e.from_status || '∅'} → <strong>{e.to_status}</strong></span>
-              {e.detail ? <span style={{ color: '#94a3b8' }}>{JSON.stringify(e.detail)}</span> : null}
-            </li>
-          ))}
-          {events.length === 0 ? <li style={{ color: '#94a3b8' }}>no events</li> : null}
-        </ul>
-      </Card>
+      {/* Row 4 — notes + timeline side by side */}
+      <div style={{ ...grid2, marginTop: 16 }}>
+        <Card title={`Notes${notes.length ? ` (${notes.length})` : ''}`}>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+            <textarea
+              value={noteText}
+              onChange={(e) => setNoteText(e.target.value)}
+              placeholder="Add a note…"
+              rows={2}
+              style={{ ...editInput, flex: 1, resize: 'vertical' }}
+            />
+            <button onClick={addNote} disabled={busy || !noteText.trim()} style={btn.secondary}>Add</button>
+          </div>
+          <ul style={{ listStyle: 'none', margin: 0, padding: 0, maxHeight: 260, overflowY: 'auto' }}>
+            {notes.map((n) => (
+              <li key={n.id} style={{ padding: '8px 0', borderBottom: '1px solid rgba(148,163,184,0.08)', fontSize: 13 }}>
+                <div style={{ color: '#e2e8f0', whiteSpace: 'pre-wrap' }}>{n.body}</div>
+                <div style={{ ...sub, marginTop: 3 }}>
+                  {n.author || 'admin'} · {new Date(n.created_at).toLocaleString()}
+                  {' · '}
+                  <button onClick={() => call('DELETE', `/notes/${n.id}`)} style={{ ...miniBtn, padding: '1px 6px' }}>delete</button>
+                </div>
+              </li>
+            ))}
+            {notes.length === 0 ? <li style={{ color: '#94a3b8' }}>no notes yet</li> : null}
+          </ul>
+        </Card>
+
+        <Card title="Timeline">
+          <ul style={{ listStyle: 'none', margin: 0, padding: 0, maxHeight: 300, overflowY: 'auto' }}>
+            {events.map((e) => (
+              <li key={e.id} style={{ display: 'flex', gap: 12, padding: '8px 0', borderBottom: '1px solid rgba(148,163,184,0.08)', fontSize: 13 }}>
+                <span style={{ color: '#64748b', minWidth: 130, flexShrink: 0 }}>{new Date(e.created_at).toLocaleString()}</span>
+                <span style={{ color: '#e2e8f0' }}>{e.from_status || '∅'} → <strong>{e.to_status}</strong></span>
+                {e.detail ? <span style={{ color: '#94a3b8', fontSize: 12 }}>{JSON.stringify(e.detail)}</span> : null}
+              </li>
+            ))}
+            {events.length === 0 ? <li style={{ color: '#94a3b8' }}>no events</li> : null}
+          </ul>
+        </Card>
+      </div>
+
+      {lightbox ? <Lightbox {...lightbox} onClose={() => setLightbox(null)} /> : null}
+      {showPdf && media.proposalPdf ? <PdfModal url={media.proposalPdf} onClose={() => setShowPdf(false)} /> : null}
     </AdminLayout>
   );
 }
 
 function Card({ title, children, action }) {
   return (
-    <section style={{ ...adminStyles.tableSection, marginTop: 16 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+    <section style={adminStyles.tableSection}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 8 }}>
         <h3 style={{ margin: 0, fontSize: 16, color: '#f8fafc' }}>{title}</h3>
         {action || null}
       </div>
@@ -322,28 +349,57 @@ function UploadBtn({ label, accept, onFile }) {
     </label>
   );
 }
-function Shot({ label, src }) {
+function Thumb({ src, alt, empty, onClick, contain, height = 170 }) {
+  if (!src) return <div style={{ ...assetEmpty, height, display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center' }}>{empty}</div>;
   return (
-    <figure style={{ margin: '0 0 14px' }}>
-      <figcaption style={{ ...sub, marginBottom: 6 }}>{label}</figcaption>
-      <a href={src} target="_blank" rel="noreferrer">
-        <img src={src} alt={label} style={{ width: '100%', borderRadius: 10, border: '1px solid rgba(148,163,184,0.16)' }} />
-      </a>
-    </figure>
+    <img
+      src={src} alt={alt} onClick={onClick}
+      style={{
+        width: '100%', height, objectFit: contain ? 'contain' : 'cover',
+        background: contain ? '#fff' : 'rgba(2,6,23,0.4)', padding: contain ? 8 : 0, boxSizing: 'border-box',
+        borderRadius: 10, border: '1px solid rgba(148,163,184,0.16)', display: 'block', cursor: 'zoom-in',
+      }}
+    />
+  );
+}
+function Lightbox({ src, label, onClose }) {
+  return (
+    <div style={backdrop} onClick={onClose}>
+      <div style={{ maxWidth: '92vw', maxHeight: '90vh' }} onClick={(e) => e.stopPropagation()}>
+        {label ? <div style={{ color: '#e2e8f0', marginBottom: 10, fontSize: 13, textAlign: 'center' }}>{label}</div> : null}
+        <img src={src} alt={label} style={{ maxWidth: '92vw', maxHeight: '80vh', borderRadius: 12, display: 'block' }} />
+      </div>
+    </div>
+  );
+}
+function PdfModal({ url, onClose }) {
+  return (
+    <div style={backdrop} onClick={onClose}>
+      <div style={{ width: '90vw', height: '90vh', background: '#1e293b', borderRadius: 14, overflow: 'hidden', position: 'relative' }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 16px', background: '#0f172a' }}>
+          <span style={{ color: '#e2e8f0', fontSize: 13, fontWeight: 600 }}>Proposal preview</span>
+          <span>
+            <a href={url} target="_blank" rel="noreferrer" style={{ ...miniBtn, textDecoration: 'none', marginRight: 8 }}>Open in new tab</a>
+            <button onClick={onClose} style={miniBtn}>Close ✕</button>
+          </span>
+        </div>
+        <iframe src={url} title="Proposal preview" style={{ width: '100%', height: 'calc(100% - 42px)', border: 'none', background: '#fff' }} />
+      </div>
+    </div>
   );
 }
 
-const grid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 16 };
+const grid3 = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 16 };
+const grid2 = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: 16 };
 const a = { color: '#7dd3fc' };
 const sub = { color: '#64748b', fontSize: 12 };
 const editInput = { width: '100%', padding: '7px 10px', borderRadius: 8, background: 'rgba(2,6,23,0.6)', border: '1px solid rgba(148,163,184,0.22)', color: '#e2e8f0', fontSize: 13, marginTop: 3, boxSizing: 'border-box' };
 const miniBtn = { border: '1px solid rgba(148,163,184,0.25)', borderRadius: 8, padding: '4px 10px', background: 'rgba(15,23,42,0.9)', color: '#e2e8f0', cursor: 'pointer', fontSize: 12, marginLeft: 6 };
-const assetBlock = { padding: '10px 0', borderBottom: '1px solid rgba(148,163,184,0.1)' };
-const assetHead = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 13, color: '#cbd5e1', marginBottom: 8, gap: 8 };
-const assetImg = { width: '100%', borderRadius: 10, border: '1px solid rgba(148,163,184,0.16)', display: 'block' };
 const assetEmpty = { color: '#94a3b8', fontSize: 12, padding: '10px 12px', background: 'rgba(2,6,23,0.4)', borderRadius: 8 };
 const tag = { fontStyle: 'normal', fontSize: 10, padding: '1px 6px', borderRadius: 999, border: '1px solid rgba(148,163,184,0.35)', color: '#94a3b8', marginLeft: 6 };
+const backdrop = { position: 'fixed', inset: 0, background: 'rgba(2,6,23,0.78)', display: 'grid', placeItems: 'center', zIndex: 60, backdropFilter: 'blur(2px)' };
 const btn = {
+  primary: { border: 'none', borderRadius: 12, padding: '10px 16px', background: 'linear-gradient(135deg,#2563eb,#7c3aed)', color: '#fff', cursor: 'pointer', fontWeight: 700, fontSize: 14 },
   secondary: { border: '1px solid rgba(148,163,184,0.25)', borderRadius: 12, padding: '10px 14px', background: 'rgba(15,23,42,0.9)', color: '#e2e8f0', cursor: 'pointer', fontWeight: 600, textDecoration: 'none', fontSize: 14 },
   danger: { border: '1px solid rgba(248,113,113,0.3)', borderRadius: 12, padding: '10px 14px', background: 'rgba(127,29,29,0.4)', color: '#fecaca', cursor: 'pointer', fontWeight: 600 },
 };
