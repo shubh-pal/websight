@@ -72,7 +72,7 @@
 </head>
 <body>
 
-<div class="toolbar"><strong>Pitch deck template — v3 &middot; Creative (editorial/premium)</strong><span>6 slides &middot; 1280&times;720 (16:9)</span></div>
+<div class="toolbar"><strong>Pitch deck template — v3 &middot; Creative (editorial/premium)</strong><span>5 slides &middot; 1280&times;720 (16:9)</span></div>
 
 <script>
 window.PITCH_DATA = {
@@ -88,7 +88,7 @@ window.PITCH_DATA = {
     auditScore: 55,
     auditReasons: ["Site unreachable — HTTP 403 error", "No mobile-optimized layout detected", "Outdated footer copyright (2019)"]
   },
-  pricing: { min: 200, max: 1000, days: 7 },
+  pricing: { min: 200, max: 1000, days: 7, perPage: 200 },
   designSystem: {
     colors: { primary: "#1E3A8A", secondary: "#3B82F6", accent: "#F97316", background: "#F8FAFC", foreground: "#0F172A" },
     fonts: { heading: "Poppins", body: "Open Sans" }
@@ -132,23 +132,7 @@ function render(D) {
       <p style="color:rgba(255,255,255,0.65);margin-top:16px;max-width:560px">${D.business.category} &mdash; prepared exclusively for ${D.business.name}.</p>
     </div>
     <div class="num-watermark" style="bottom:-70px;right:20px;color:rgba(255,255,255,0.06)">01</div>
-    <div class="page-num on-dark">01 / 06</div>
-  </div>
-
-  <div class="slide">
-    <div class="num-watermark" style="top:-40px;right:20px">02</div>
-    <div class="pad">
-      <div class="kicker">The problem</div>
-      <h2 class="serif" style="font-size:36px;margin:14px 0 40px">What the numbers say</h2>
-      <div class="gauge-wrap">
-        ${gaugeSvg(D.business.auditScore, accent)}
-        <div class="checklist">
-          ${D.business.auditReasons.map(r => `<div><span class="x">&times;</span><p>${r}</p></div>`).join('')}
-        </div>
-      </div>
-      <p style="margin-top:36px;max-width:640px;font-size:15.5px">${D.business.positioning}</p>
-    </div>
-    <div class="page-num">02 / 06</div>
+    <div class="page-num on-dark">01 / 05</div>
   </div>
 
   <div class="slide">
@@ -165,12 +149,12 @@ function render(D) {
         <div class="caption"><div class="n serif">After</div><div class="mono" style="color:rgba(255,255,255,0.7)">newDesignScreenshotUrl</div></div>
       </div>
     </div>
-    <div class="num-watermark" style="bottom:-60px;left:50%;transform:translateX(-50%);color:rgba(0,0,0,0.04)">03</div>
-    <div class="page-num">03 / 06</div>
+    <div class="num-watermark" style="bottom:-60px;left:50%;transform:translateX(-50%);color:rgba(0,0,0,0.04)">02</div>
+    <div class="page-num">02 / 05</div>
   </div>
 
   <div class="slide">
-    <div class="num-watermark" style="top:-40px;left:40px">04</div>
+    <div class="num-watermark" style="top:-40px;left:40px">03</div>
     <div class="pad">
       <div class="kicker">The craft</div>
       <h2 class="serif" style="font-size:36px;margin:14px 0 4px">A system, not a template</h2>
@@ -183,26 +167,32 @@ function render(D) {
         <div><div class="Aa" style="font-family:'${D.designSystem.fonts.body}',sans-serif;font-weight:400">Aa</div><div class="meta">${D.designSystem.fonts.body} &middot; Body</div></div>
       </div>
     </div>
-    <div class="page-num">04 / 06</div>
+    <div class="page-num">03 / 05</div>
   </div>
 
   <div class="slide">
-    <div class="num-watermark" style="top:-40px;right:40px">05</div>
+    <div class="num-watermark" style="top:-40px;right:40px">04</div>
     <div class="pad">
-      <div class="kicker">The plan</div>
-      <h2 class="serif" style="font-size:36px;margin:14px 0 8px">Seven days, start to launch</h2>
-      <p style="max-width:600px">A fixed, focused build &mdash; no scope creep, no open-ended retainer.</p>
-      <div class="timeline" style="max-width:760px">
-        <div class="fill" style="width:100%"></div>
-        ${[[0,'Day 1','Kickoff & content pull'],[33,'Day 3','Design system live'],[66,'Day 5','Pages built'],[100,'Day 7','Launch']]
-          .map(([pos,d,l]) => `<div class="milestone" style="left:${pos}%"></div><div class="milestone-label" style="left:${pos}%">${d}<br/><span style="color:#a8a29e">${l}</span></div>`).join('')}
+      <div class="kicker">The investment</div>
+      <h2 class="serif" style="font-size:38px;margin:14px 0 26px;max-width:700px">Stand out against your competitors at the cost of just a dinner.</h2>
+      <div style="display:flex;align-items:baseline;gap:14px">
+        <span class="price-fine" style="font-size:92px">$${D.pricing.perPage}</span>
+        <span style="color:#78716c;font-size:16px">per page &middot; fixed price, no surprises</span>
       </div>
-      <div style="margin-top:100px;display:flex;align-items:baseline;gap:14px">
-        <span class="price-fine">${price}</span>
-        <span style="color:#78716c;font-size:14px">fixed price &middot; fully responsive &middot; built on your brand</span>
+      <hr class="rule" style="max-width:780px;margin:34px 0 30px">
+      <div style="display:flex;gap:56px;max-width:840px">
+        <div style="flex:1.2">
+          <div class="kicker" style="color:${accent}">Why is it so affordable?</div>
+          <p style="margin-top:10px;font-size:15.5px">Not because the quality is lower. Because the power of AI lets us spend less time on repetitive production &mdash; and more time on the decisions that make your business feel distinct.</p>
+        </div>
+        <div style="width:1px;background:#d6d3cd"></div>
+        <div style="flex:1;display:flex;flex-direction:column;gap:18px">
+          <div><div class="kicker" style="font-size:11px">The human part</div><p style="margin-top:4px;font-size:14.5px">Your story, offer, voice and local insight.</p></div>
+          <div><div class="kicker" style="font-size:11px">The AI-assisted part</div><p style="margin-top:4px;font-size:14.5px">Faster research, layouts, iteration and delivery.</p></div>
+        </div>
       </div>
     </div>
-    <div class="page-num">05 / 06</div>
+    <div class="page-num">04 / 05</div>
   </div>
 
   <div class="slide">
@@ -216,7 +206,7 @@ function render(D) {
         <span>${D.agency.name}</span><span>${D.agency.email}</span><span>${D.agency.phone}</span><span>${D.agency.website}</span>
       </div>
     </div>
-    <div class="page-num on-dark">06 / 06</div>
+    <div class="page-num on-dark">05 / 05</div>
   </div>
   `;
 }
