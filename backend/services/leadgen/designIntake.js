@@ -1,0 +1,49 @@
+/**
+ * Single entry point for "a redesign mockup image arrived for this lead" —
+ * used by the manual dashboard upload AND the design MCP's submit_design
+ * tool. Stores the image, flips the lead to ui_generated, then immediately
+ * builds the pitch PDF (Puppeteer only — no paid API call) and queues it.
+ */
+const gcs = require('../gcsStorage');
+const store = require('./store');
+const { buildProposalPdf } = require('./proposalPdf');
+
+const CONTENT_TYPE = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp' };
+
+async function receiveMockup(leadId, buffer, ext, { source = 'manual' } = {}) {
+  if (!gcs.isEnabled) throw new Error('GCS not configured');
+  const contentType = CONTENT_TYPE[ext];
+  if (!contentType) throw new Error(`unsupported image type: .${ext}`);
+  if (buffer.length > 8 * 1024 * 1024) throw new Error('image over 8 MB');
+
+  const [lead] = await store.q(`SELECT * FROM leads WHERE id = $1`, [leadId]);
+  if (!lead) throw new Error('lead not found');
+  if (!['building_pdf', 'ui_generated', 'error'].includes(lead.status)) {
+    throw new Error(`lead is '${lead.status}', expected 'building_pdf'`);
+  }
+
+  const key = `companies/${leadId}/mockup.${ext === 'jpeg' ? 'jpg' : ext}`;
+  await gcs.uploadFile(key, buffer, contentType);
+  await store.updateLead(leadId, { mockup_gcs_key: key, status: 'ui_generated', error: null, error_stage: null });
+  await store.recordEvent(leadId, lead.status, 'ui_generated', { source });
+
+  try {
+    const { proposalKey } = await buildProposalPdf(leadId);
+    await store.updateLead(leadId, { proposal_gcs_key: proposalKey, status: 'queued_for_mail' });
+    await store.recordEvent(leadId, 'ui_generated', 'queued_for_mail', { source: 'auto-pdf' });
+    return { status: 'queued_for_mail', mockupKey: key, proposalKey };
+  } catch (err) {
+    await store.markError({ id: leadId, status: 'ui_generated', attempts: lead.attempts }, 'pdf', err);
+    throw err;
+  }
+}
+
+/** List leads waiting on a redesign image (for the design MCP / a review page). */
+async function listPending(limit = 25) {
+  return store.q(
+    `SELECT * FROM leads WHERE status = 'building_pdf' ORDER BY approved_at ASC NULLS LAST, updated_at ASC LIMIT $1`,
+    [limit]
+  );
+}
+
+module.exports = { receiveMockup, listPending };

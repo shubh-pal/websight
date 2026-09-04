@@ -8,7 +8,9 @@
     "dev": "nodemon index.js",
     "mcp:start": "node mcp/index.js",
     "mcp:dev": "nodemon mcp/index.js",
-    "mcp:test": "node --test test/mcpPublicApiClient.test.js"
+    "mcp:test": "node --test test/mcpPublicApiClient.test.js",
+    "mcp:design:start": "node mcp/design/index.js",
+    "mcp:design:dev": "nodemon mcp/design/index.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.24.0",

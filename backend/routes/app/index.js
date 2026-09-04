@@ -60,6 +60,7 @@ router.get('/pipeline/summary', async (req, res) => {
 });
 
 router.use('/leadgen', require('./leadgen'));
+router.use('/settings', require('./settings'));
 // Phase C+: router.use('/qualify', require('./qualify'));
 //           router.use('/proposals', require('./proposals'));
 

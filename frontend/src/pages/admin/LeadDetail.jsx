@@ -219,7 +219,21 @@ export default function LeadDetail() {
             ) : <div style={assetEmpty}>{lead.gcs_prefix ? 'design system not parsed' : 'not scraped yet'}</div>}
           </div>
 
-          {media.mockup ? <Shot label="Redesign mockup" src={media.mockup} /> : null}
+          {/* Redesign mockup — the paid step. Upload here or via the design MCP. */}
+          {['building_pdf', 'ui_generated', 'queued_for_mail', 'contacted', 'replied'].includes(lead.status) || media.mockup ? (
+            <div style={assetBlock}>
+              <div style={assetHead}>
+                <span>Redesign mockup</span>
+                {['building_pdf', 'ui_generated', 'error'].includes(lead.status) ? (
+                  <UploadBtn label={media.mockup ? 'Replace' : 'Upload'} accept="image/*" onFile={(f) => uploadAsset('mockup', f)} />
+                ) : null}
+              </div>
+              {media.mockup
+                ? <a href={media.mockup} target="_blank" rel="noreferrer"><img src={media.mockup} alt="mockup" style={assetImg} /></a>
+                : <div style={assetEmpty}>waiting on a design — generate one from the brief (design MCP, or the audit/screenshot above) and upload it here</div>}
+            </div>
+          ) : null}
+
           {media.proposalPdf ? <a href={media.proposalPdf} target="_blank" rel="noreferrer" style={{ ...btn.secondary, display: 'inline-block', marginTop: 10 }}>Open proposal PDF</a> : null}
           {lead.gcs_prefix ? <div style={{ ...sub, marginTop: 8 }}>GCS: {lead.gcs_prefix}</div> : null}
         </Card>

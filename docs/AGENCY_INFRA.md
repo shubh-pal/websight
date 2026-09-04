@@ -45,6 +45,27 @@ gcloud alpha services quota update --service=places.googleapis.com \
   --metric=places.googleapis.com/SearchTextRequest --unit="1/d/{project}" --value=<N> --force
 ```
 
+## Design MCP (Phase D — no gpt-image-1, no per-image API cost)
+
+`backend/mcp/design/` — a second, **authenticated** MCP server (separate from the
+public scrape MCP) exposing:
+
+- `list_pending_designs` — leads approved and waiting on a redesign image (status `building_pdf`)
+- `get_design_brief(leadId)` — business info, audit findings, the scraped design system, the
+  current screenshot (embedded image), and a ready-to-use art-direction prompt
+- `submit_design(leadId, imageBase64, filename)` — uploads the mockup, flips the lead to
+  `ui_generated`, and **automatically builds + queues the pitch PDF** (Puppeteer only, $0 cost)
+
+It does not call any image API and does not automate the ChatGPT web app — it's a plain data
+hand-off. Point any MCP-capable client at it (an agent session with an image tool, a scheduled
+Claude Code routine, etc.) or use it as a structured checklist for manual work: pull the brief,
+generate the image with whatever you already have (ChatGPT Plus app, etc.), then upload it either
+through this MCP or straight from the dashboard (Lead detail → Assets → Redesign mockup → Upload).
+
+Run it: `cd backend && npm run mcp:design:dev` — listens on `127.0.0.1:3003/mcp`, requires
+`MCP_DESIGN_TOKEN` (generated into `backend/.env`) as a `Bearer` header. Refuses to start without
+the token set.
+
 ## Local dev notes
 
 - `backend/.env` (gitignored) carries `DATABASE_URL` (Supabase **session pooler**,

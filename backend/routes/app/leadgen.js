@@ -9,6 +9,7 @@ const niches = require('../../services/leadgen/niches');
 const rerun = require('../../services/leadgen/rerun');
 const settings = require('../../services/leadgen/settings');
 const { reevaluate } = require('../../services/leadgen/qualify');
+const designIntake = require('../../services/leadgen/designIntake');
 const gcs = require('../../services/gcsStorage');
 
 const router = express.Router();
@@ -170,24 +171,35 @@ router.get('/leads/:id', async (req, res) => {
   res.json({ lead, events, media, notes, designSystem, threshold, effectiveScore });
 });
 
-// Upload / replace a lead asset. Body: { kind: 'screenshot'|'logo', filename, dataBase64 }
+// Upload / replace a lead asset. Body: { kind: 'screenshot'|'logo'|'mockup', filename, dataBase64 }
+// 'mockup' is special: it's the redesign image, so it also flips the lead to
+// ui_generated and auto-builds the pitch PDF (see services/leadgen/designIntake.js).
 const ASSET_EXT = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', svg: 'image/svg+xml', gif: 'image/gif' };
 router.post('/leads/:id/asset', async (req, res) => {
   if (!gcs.isEnabled) return res.status(503).json({ error: 'GCS not configured' });
   const { kind, filename, dataBase64 } = req.body || {};
-  if (!['screenshot', 'logo'].includes(kind)) return res.status(400).json({ error: "kind must be 'screenshot' or 'logo'" });
+  if (!['screenshot', 'logo', 'mockup'].includes(kind)) {
+    return res.status(400).json({ error: "kind must be 'screenshot', 'logo', or 'mockup'" });
+  }
   if (!dataBase64) return res.status(400).json({ error: 'dataBase64 required' });
 
   const ext = String(filename || '').split('.').pop().toLowerCase();
   const contentType = ASSET_EXT[ext];
   if (!contentType) return res.status(400).json({ error: `unsupported file type: .${ext}` });
-
-  const [lead] = await store.q(`SELECT id, manual_assets FROM leads WHERE id = $1`, [req.params.id]);
-  if (!lead) return res.status(404).json({ error: 'Lead not found' });
-
   const buf = Buffer.from(dataBase64.replace(/^data:[^,]+,/, ''), 'base64');
   if (buf.length > 8 * 1024 * 1024) return res.status(413).json({ error: 'file over 8 MB' });
 
+  if (kind === 'mockup') {
+    try {
+      const result = await designIntake.receiveMockup(req.params.id, buf, ext, { source: req.user?.email || 'manual-upload' });
+      return res.json({ ok: true, kind, ...result });
+    } catch (err) {
+      return res.status(400).json({ error: err.message });
+    }
+  }
+
+  const [lead] = await store.q(`SELECT id, manual_assets FROM leads WHERE id = $1`, [req.params.id]);
+  if (!lead) return res.status(404).json({ error: 'Lead not found' });
   const key = `companies/${lead.id}/manual/${kind}.${ext === 'jpeg' ? 'jpg' : ext}`;
   await gcs.uploadFile(key, buf, contentType);
   await store.updateLead(lead.id, { manual_assets: { ...(lead.manual_assets || {}), [kind]: key } });
