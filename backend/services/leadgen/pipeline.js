@@ -17,12 +17,15 @@ async function runStage(fromStatus, workingStatus, limit, handler) {
   let ok = 0;
   let failed = 0;
   for (const lead of claimed) {
+    // Handlers record events with lead.status as the "from" — use the real
+    // pre-claim status, not the transient working status.
+    const l = { ...lead, status: fromStatus };
     try {
-      await handler({ ...lead, status: workingStatus });
+      await handler(l);
       ok += 1;
     } catch (err) {
       console.error(`[pipeline] ${fromStatus} lead ${lead.id} failed:`, err.message);
-      await store.markError({ ...lead, status: workingStatus }, fromStatus, err);
+      await store.markError(l, fromStatus, err);
       failed += 1;
     }
   }

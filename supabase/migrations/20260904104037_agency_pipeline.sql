@@ -1,0 +1,105 @@
+-- ============================================================================
+-- Agency pipeline — internal lead-gen -> redesign proposal -> outreach
+-- Applied automatically by backend/db/index.js ensureSchema(); also runnable
+-- standalone against the Supabase database.
+-- Nothing here touches existing tables.
+-- ============================================================================
+
+-- One discovery execution (a Places API grid sweep).
+CREATE TABLE IF NOT EXISTS lead_runs (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  grid          JSONB NOT NULL,
+  requested_by  TEXT,
+  places_calls  INTEGER DEFAULT 0,
+  new_leads     INTEGER DEFAULT 0,
+  status        TEXT DEFAULT 'running',      -- running | done | error
+  error         TEXT,
+  created_at    TIMESTAMPTZ DEFAULT NOW(),
+  finished_at   TIMESTAMPTZ
+);
+
+-- One business. `status` drives the pipeline state machine.
+CREATE TABLE IF NOT EXISTS leads (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  run_id          UUID REFERENCES lead_runs(id) ON DELETE SET NULL,
+
+  place_id        TEXT UNIQUE NOT NULL,      -- Places TOS: cacheable indefinitely
+  name            TEXT,
+  country         TEXT,
+  city            TEXT,
+  category        TEXT,
+  address         TEXT,
+  phone           TEXT,
+  phone_intl      TEXT,
+  website         TEXT,
+  rating          REAL,                      -- Places TOS: refresh within 30 days
+  reviews         INTEGER,
+  business_status TEXT,
+  maps_uri        TEXT,
+  places_refreshed_at TIMESTAMPTZ,
+
+  status          TEXT NOT NULL DEFAULT 'discovered',
+  error_stage     TEXT,
+  error           TEXT,
+  attempts        JSONB NOT NULL DEFAULT '{}'::jsonb,
+
+  gcs_prefix      TEXT,
+  contact_email   TEXT,
+
+  audit_score     INTEGER,
+  audit_reasons   TEXT,
+  audit_signals   JSONB,
+
+  qualify_decision   TEXT,                   -- qualified | rejected
+  qualify_confidence REAL,
+  qualify_value_usd  INTEGER,
+  qualify_angle      TEXT,
+  qualify_raw        JSONB,
+  qualified_by       TEXT,                   -- 'gemini' | admin email (manual override)
+
+  redesign_batch_id  TEXT,
+  redesign_concept   JSONB,
+  mockup_gcs_key     TEXT,
+  proposal_gcs_key   TEXT,
+
+  hold_reason     TEXT,
+  contacted_at    TIMESTAMPTZ,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS leads_status_idx  ON leads(status);
+CREATE INDEX IF NOT EXISTS leads_country_idx ON leads(country);
+CREATE INDEX IF NOT EXISTS leads_run_idx     ON leads(run_id);
+
+-- Append-only transition log.
+CREATE TABLE IF NOT EXISTS lead_events (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  lead_id     UUID REFERENCES leads(id) ON DELETE CASCADE,
+  from_status TEXT,
+  to_status   TEXT,
+  detail      JSONB,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS lead_events_lead_idx ON lead_events(lead_id, created_at DESC);
+
+-- Outreach (Stage 5, built later).
+CREATE TABLE IF NOT EXISTS outreach_messages (
+  id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  lead_id        UUID REFERENCES leads(id) ON DELETE CASCADE,
+  channel        TEXT DEFAULT 'email',
+  to_address     TEXT,
+  subject        TEXT,
+  body           TEXT,
+  esp_message_id TEXT,
+  status         TEXT DEFAULT 'queued',      -- queued|sent|delivered|opened|replied|bounced|failed
+  sent_at        TIMESTAMPTZ,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS outreach_lead_idx ON outreach_messages(lead_id);
+
+CREATE TABLE IF NOT EXISTS suppressions (
+  email      TEXT PRIMARY KEY,
+  reason     TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
