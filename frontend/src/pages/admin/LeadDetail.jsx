@@ -235,6 +235,11 @@ export default function LeadDetail() {
           ) : null}
 
           {media.proposalPdf ? <a href={media.proposalPdf} target="_blank" rel="noreferrer" style={{ ...btn.secondary, display: 'inline-block', marginTop: 10 }}>Open proposal PDF</a> : null}
+          {lead.mockup_gcs_key ? (
+            <button onClick={() => action('rebuild-proposal', null, media.proposalPdf ? 'Rebuild the proposal PDF from the current mockup, lead data, and agency settings?' : null)} disabled={busy} style={{ ...btn.secondary, marginTop: 10, marginLeft: media.proposalPdf ? 8 : 0 }}>
+              {media.proposalPdf ? 'Rebuild proposal' : 'Build proposal'}
+            </button>
+          ) : null}
           {lead.gcs_prefix ? <div style={{ ...sub, marginTop: 8 }}>GCS: {lead.gcs_prefix}</div> : null}
         </Card>
       </div>

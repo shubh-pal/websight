@@ -286,6 +286,26 @@ router.post('/leads/:id/audit', async (req, res) => {
   res.json({ ok: true, queued: 1 });
 });
 
+// Re-render the PDF from the current mockup/company settings/lead data — no
+// re-scrape, no re-qualify, no new image needed. Use after a template change,
+// an edited lead field, or an updated company profile.
+router.post('/leads/:id/rebuild-proposal', async (req, res) => {
+  const [lead] = await store.q(`SELECT * FROM leads WHERE id = $1`, [req.params.id]);
+  if (!lead) return res.status(404).json({ error: 'Lead not found' });
+  if (!lead.mockup_gcs_key) {
+    return res.status(400).json({ error: 'Lead has no redesign mockup yet — upload one first.' });
+  }
+  try {
+    const { buildProposalPdf } = require('../../services/leadgen/proposalPdf');
+    const { proposalKey } = await buildProposalPdf(lead.id);
+    await store.updateLead(lead.id, { proposal_gcs_key: proposalKey, error: null, error_stage: null });
+    await store.recordEvent(lead.id, lead.status, lead.status, { rebuiltProposal: true, by: req.user?.email || 'admin' });
+    res.json({ ok: true, proposalKey });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Notes.
 router.post('/leads/:id/notes', async (req, res) => {
   const body = (req.body?.body || '').trim();
