@@ -109,6 +109,33 @@ async function markError(lead, stage, err) {
   await recordEvent(lead.id, lead.status, 'error', { stage });
 }
 
+const EDITABLE_LEAD_COLS = ['name', 'website', 'contact_email', 'phone', 'phone_intl', 'address', 'category', 'city', 'country', 'rating', 'reviews'];
+
+async function editLead(id, patch) {
+  const keys = Object.keys(patch).filter((k) => EDITABLE_LEAD_COLS.includes(k));
+  if (!keys.length) return null;
+  const sets = keys.map((k, i) => `${k} = $${i + 2}`).join(', ');
+  await q(`UPDATE leads SET ${sets}, updated_at = NOW() WHERE id = $1`, [id, ...keys.map((k) => patch[k])]);
+  const [row] = await q(`SELECT * FROM leads WHERE id = $1`, [id]);
+  return row;
+}
+
+async function addNote(leadId, body, author) {
+  const [row] = await q(
+    `INSERT INTO lead_notes (lead_id, body, author) VALUES ($1, $2, $3) RETURNING *`,
+    [leadId, body, author || null]
+  );
+  return row;
+}
+
+async function listNotes(leadId) {
+  return q(`SELECT * FROM lead_notes WHERE lead_id = $1 ORDER BY created_at DESC`, [leadId]);
+}
+
+async function deleteNote(leadId, noteId) {
+  await q(`DELETE FROM lead_notes WHERE id = $1 AND lead_id = $2`, [noteId, leadId]);
+}
+
 async function summary() {
   const rows = await q(
     `SELECT status, COUNT(*)::int AS count FROM leads GROUP BY status`
@@ -126,5 +153,9 @@ module.exports = {
   setStatus,
   recordEvent,
   markError,
+  editLead,
+  addNote,
+  listNotes,
+  deleteNote,
   summary,
 };

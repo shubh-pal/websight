@@ -17,6 +17,7 @@ export default function LeadsPipeline() {
   const [search, setSearch] = useState('');
   const [busy, setBusy] = useState(false);
   const [showDiscovery, setShowDiscovery] = useState(false);
+  const [selected, setSelected] = useState(new Set());
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -52,6 +53,42 @@ export default function LeadsPipeline() {
       await load();
     } catch (err) {
       alert(`Close failed: ${err.message}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function toggleSel(id) {
+    setSelected((s) => {
+      const n = new Set(s);
+      n.has(id) ? n.delete(id) : n.add(id);
+      return n;
+    });
+  }
+
+  async function bulk(action) {
+    const ids = [...selected];
+    if (!ids.length) return;
+    let body = { ids };
+    if (action === 'close') {
+      const reason = window.prompt(`Close ${ids.length} leads? Optional reason:`, '');
+      if (reason === null) return;
+      body.reason = reason;
+    }
+    setBusy(true);
+    try {
+      const res = await fetch(`${API}/leads/bulk/${action}`, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || `HTTP ${res.status}`);
+      const j = await res.json();
+      setSelected(new Set());
+      await load();
+      if (action === 'audit') alert(`Queued ${j.queued} leads for re-audit. Refresh to watch progress.`);
+    } catch (err) {
+      alert(`Bulk ${action} failed: ${err.message}`);
     } finally {
       setBusy(false);
     }
@@ -146,11 +183,27 @@ export default function LeadsPipeline() {
         </span>
       </div>
 
+      {selected.size > 0 ? (
+        <div style={bulkBar}>
+          <strong>{selected.size} selected</strong>
+          <button onClick={() => bulk('audit')} disabled={busy} style={btn.primary}>Run audit</button>
+          <button onClick={() => bulk('close')} disabled={busy} style={btn.tinyDanger}>Close</button>
+          <button onClick={() => setSelected(new Set())} style={btn.tinySecondary}>Clear</button>
+        </div>
+      ) : null}
+
       <section style={adminStyles.tableSection}>
         <div style={adminStyles.tableWrap}>
           <table style={adminStyles.table}>
             <thead>
               <tr>
+                <th style={adminStyles.th}>
+                  <input
+                    type="checkbox"
+                    checked={filtered.length > 0 && filtered.every((l) => selected.has(l.id))}
+                    onChange={(e) => setSelected(e.target.checked ? new Set(filtered.map((l) => l.id)) : new Set())}
+                  />
+                </th>
                 {['Business', 'Niche', 'Location', 'Category', 'Score', 'Stage', 'Value', 'Contact', 'Updated', ''].map((c) => (
                   <th key={c} style={adminStyles.th}>{c}</th>
                 ))}
@@ -158,11 +211,14 @@ export default function LeadsPipeline() {
             </thead>
             <tbody>
               {loading ? (
-                <tr><td style={adminStyles.emptyCell} colSpan={10}>Loading…</td></tr>
+                <tr><td style={adminStyles.emptyCell} colSpan={11}>Loading…</td></tr>
               ) : filtered.length === 0 ? (
-                <tr><td style={adminStyles.emptyCell} colSpan={10}>No leads match.</td></tr>
+                <tr><td style={adminStyles.emptyCell} colSpan={11}>No leads match.</td></tr>
               ) : filtered.map((l) => (
-                <tr key={l.id}>
+                <tr key={l.id} style={selected.has(l.id) ? { background: 'rgba(37,99,235,0.12)' } : null}>
+                  <td style={adminStyles.td}>
+                    <input type="checkbox" checked={selected.has(l.id)} onChange={() => toggleSel(l.id)} />
+                  </td>
                   <td style={adminStyles.td}>
                     <Link to={`/admin/leads/${l.id}`} style={link}>{l.name || '—'}</Link>
                     {l.website ? <div style={sub}>{l.website.replace(/^https?:\/\//, '')}</div> : <div style={sub}>no website</div>}
@@ -195,6 +251,7 @@ export default function LeadsPipeline() {
   );
 }
 
+const bulkBar = { display: 'flex', gap: 10, alignItems: 'center', padding: '10px 14px', margin: '10px 0', borderRadius: 12, background: 'rgba(37,99,235,0.15)', border: '1px solid rgba(125,211,252,0.3)', color: '#e2e8f0' };
 const stageStrip = { display: 'flex', gap: 10, flexWrap: 'wrap', margin: '18px 0 8px' };
 const stageChip = {
   display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,

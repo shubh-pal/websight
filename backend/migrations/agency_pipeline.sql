@@ -121,6 +121,16 @@ ALTER TABLE leads     ADD COLUMN IF NOT EXISTS niche_id UUID REFERENCES niches(i
 ALTER TABLE lead_runs ADD COLUMN IF NOT EXISTS niche_id UUID REFERENCES niches(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS leads_niche_idx ON leads(niche_id);
 
+-- Free-text notes on a lead (timestamped log).
+CREATE TABLE IF NOT EXISTS lead_notes (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  lead_id    UUID REFERENCES leads(id) ON DELETE CASCADE,
+  body       TEXT NOT NULL,
+  author     TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS lead_notes_lead_idx ON lead_notes(lead_id, created_at DESC);
+
 -- Starter niches (idempotent).
 INSERT INTO niches (name, slug, search_terms, locations) VALUES
   ('Dental', 'dental',

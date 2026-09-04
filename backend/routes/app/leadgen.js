@@ -6,6 +6,7 @@ const express = require('express');
 const { runDiscovery } = require('../../services/leadgen/discover');
 const store = require('../../services/leadgen/store');
 const niches = require('../../services/leadgen/niches');
+const rerun = require('../../services/leadgen/rerun');
 const gcs = require('../../services/gcsStorage');
 
 const router = express.Router();
@@ -96,6 +97,28 @@ router.get('/leads', async (req, res) => {
   res.json(rows);
 });
 
+// Bulk re-audit (multi-select on the pipeline table).
+router.post('/leads/bulk/audit', async (req, res) => {
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
+  if (!ids.length) return res.status(400).json({ error: 'ids[] required' });
+  const queued = await rerun.enqueueAudit(ids);
+  res.json({ ok: true, queued });
+});
+
+// Bulk close.
+router.post('/leads/bulk/close', async (req, res) => {
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
+  if (!ids.length) return res.status(400).json({ error: 'ids[] required' });
+  const reason = (req.body?.reason || '').slice(0, 300) || null;
+  for (const id of ids) {
+    const [lead] = await store.q(`SELECT status FROM leads WHERE id = $1`, [id]);
+    if (!lead || lead.status === 'closed') continue;
+    await store.updateLead(id, { status: 'closed', hold_reason: reason });
+    await store.recordEvent(id, lead.status, 'closed', { by: req.user?.email || 'admin', reason, bulk: true });
+  }
+  res.json({ ok: true, closed: ids.length });
+});
+
 router.get('/leads/:id', async (req, res) => {
   const [lead] = await store.q(`SELECT * FROM leads WHERE id = $1`, [req.params.id]);
   if (!lead) return res.status(404).json({ error: 'Lead not found' });
@@ -103,6 +126,7 @@ router.get('/leads/:id', async (req, res) => {
     `SELECT * FROM lead_events WHERE lead_id = $1 ORDER BY created_at DESC LIMIT 100`,
     [req.params.id]
   );
+  const notes = await store.listNotes(req.params.id);
 
   // Assets are streamed back through this API (works with plain ADC — no
   // service-account signing key needed locally or on Cloud Run).
@@ -114,7 +138,45 @@ router.get('/leads/:id', async (req, res) => {
     media.proposalPdf = asset(lead.proposal_gcs_key);
   }
 
-  res.json({ lead, events, media });
+  res.json({ lead, events, media, notes });
+});
+
+// Edit lead fields (website, name, contact, address, category, ...).
+router.patch('/leads/:id', async (req, res) => {
+  const [lead] = await store.q(`SELECT * FROM leads WHERE id = $1`, [req.params.id]);
+  if (!lead) return res.status(404).json({ error: 'Lead not found' });
+  const updated = await store.editLead(req.params.id, req.body || {});
+  if (!updated) return res.status(400).json({ error: 'no editable fields supplied' });
+  const changed = Object.keys(req.body || {}).filter((k) => lead[k] !== updated[k]);
+  if (changed.length) {
+    await store.recordEvent(req.params.id, lead.status, lead.status, {
+      edited: changed, by: req.user?.email || 'admin',
+    });
+  }
+  res.json(updated);
+});
+
+// Re-run scrape + audit on one lead.
+router.post('/leads/:id/audit', async (req, res) => {
+  const [lead] = await store.q(`SELECT id FROM leads WHERE id = $1`, [req.params.id]);
+  if (!lead) return res.status(404).json({ error: 'Lead not found' });
+  await rerun.enqueueAudit([req.params.id]);
+  res.json({ ok: true, queued: 1 });
+});
+
+// Notes.
+router.post('/leads/:id/notes', async (req, res) => {
+  const body = (req.body?.body || '').trim();
+  if (!body) return res.status(400).json({ error: 'body required' });
+  const [lead] = await store.q(`SELECT id FROM leads WHERE id = $1`, [req.params.id]);
+  if (!lead) return res.status(404).json({ error: 'Lead not found' });
+  const note = await store.addNote(req.params.id, body.slice(0, 4000), req.user?.email || 'admin');
+  res.status(201).json(note);
+});
+
+router.delete('/leads/:id/notes/:noteId', async (req, res) => {
+  await store.deleteNote(req.params.id, req.params.noteId);
+  res.json({ ok: true });
 });
 
 // Stream a GCS object that belongs to this lead's folder.

@@ -12,6 +12,9 @@ export default function LeadDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState({});
+  const [noteText, setNoteText] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -28,29 +31,50 @@ export default function LeadDetail() {
 
   useEffect(() => { load(); }, [load]);
 
-  async function action(path, body, confirmMsg) {
+  async function call(method, path, body, confirmMsg) {
     if (confirmMsg && !window.confirm(confirmMsg)) return;
     setBusy(true);
     try {
-      const res = await fetch(`${API}/leads/${id}/${path}`, {
-        method: 'POST', credentials: 'include',
+      const res = await fetch(`${API}/leads/${id}${path}`, {
+        method, credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body || {}),
+        body: body ? JSON.stringify(body) : undefined,
       });
       if (!res.ok) throw new Error((await res.json()).error || `HTTP ${res.status}`);
       await load();
+      return true;
     } catch (err) {
       alert(err.message);
+      return false;
     } finally {
       setBusy(false);
     }
+  }
+  const action = (p, body, msg) => call('POST', `/${p}`, body, msg);
+
+  function startEdit() {
+    const l = data.lead;
+    setForm({
+      name: l.name || '', website: l.website || '', contact_email: l.contact_email || '',
+      phone: l.phone || '', address: l.address || '', category: l.category || '',
+    });
+    setEditing(true);
+  }
+  async function saveEdit() {
+    if (await call('PATCH', '', form)) setEditing(false);
+  }
+  async function addNote() {
+    const body = noteText.trim();
+    if (!body) return;
+    if (await call('POST', '/notes', { body })) setNoteText('');
   }
 
   if (loading) return <AdminLayout title="Lead"><div style={adminStyles.loadingCard}>Loading…</div></AdminLayout>;
   if (error) return <AdminLayout title="Lead"><div style={adminStyles.errorCard}>{error}</div></AdminLayout>;
 
-  const { lead, events, media = {} } = data;
+  const { lead, events, media = {}, notes = [] } = data;
   const sig = lead.audit_signals || {};
+  const auditing = ['scraping', 'auditing'].includes(lead.status);
 
   return (
     <AdminLayout
@@ -59,6 +83,9 @@ export default function LeadDetail() {
       actions={
         <>
           <Link to="/admin/leads" style={btn.secondary}>← All leads</Link>
+          <button onClick={() => action('audit')} disabled={busy || auditing} style={btn.secondary}>
+            {auditing ? 'Auditing…' : 'Run audit'}
+          </button>
           {lead.status === 'error' ? <button onClick={() => action('retry')} disabled={busy} style={btn.secondary}>Retry</button> : null}
           {lead.status === 'closed'
             ? <button onClick={() => action('reopen', { to: 'discovered' })} disabled={busy} style={btn.secondary}>Reopen</button>
@@ -73,14 +100,31 @@ export default function LeadDetail() {
       </div>
 
       <div style={grid}>
-        <Card title="Business">
-          <Row k="Address" v={lead.address} />
-          <Row k="Phone" v={lead.phone_intl || lead.phone} />
-          <Row k="Email" v={lead.contact_email} />
-          <Row k="Category" v={lead.category} />
-          <Row k="Rating" v={lead.rating ? `${lead.rating} (${lead.reviews} reviews)` : '—'} />
-          <Row k="Website" v={lead.website ? <a href={lead.website} target="_blank" rel="noreferrer" style={a}>{lead.website}</a> : 'none'} />
-          <Row k="Google" v={lead.maps_uri ? <a href={lead.maps_uri} target="_blank" rel="noreferrer" style={a}>Maps listing</a> : '—'} />
+        <Card title="Business" action={
+          editing
+            ? <span><button onClick={saveEdit} disabled={busy} style={miniBtn}>Save</button> <button onClick={() => setEditing(false)} style={miniBtn}>Cancel</button></span>
+            : <button onClick={startEdit} style={miniBtn}>Edit</button>
+        }>
+          {editing ? (
+            <div style={{ display: 'grid', gap: 8 }}>
+              {[['name', 'Name'], ['website', 'Website'], ['contact_email', 'Email'], ['phone', 'Phone'], ['address', 'Address'], ['category', 'Category']].map(([k, label]) => (
+                <label key={k} style={{ fontSize: 12, color: '#94a3b8' }}>
+                  {label}
+                  <input value={form[k]} onChange={(e) => setForm({ ...form, [k]: e.target.value })} style={editInput} />
+                </label>
+              ))}
+            </div>
+          ) : (
+            <>
+              <Row k="Address" v={lead.address} />
+              <Row k="Phone" v={lead.phone_intl || lead.phone} />
+              <Row k="Email" v={lead.contact_email} />
+              <Row k="Category" v={lead.category} />
+              <Row k="Rating" v={lead.rating ? `${lead.rating} (${lead.reviews} reviews)` : '—'} />
+              <Row k="Website" v={lead.website ? <a href={lead.website} target="_blank" rel="noreferrer" style={a}>{lead.website}</a> : 'none'} />
+              <Row k="Google" v={lead.maps_uri ? <a href={lead.maps_uri} target="_blank" rel="noreferrer" style={a}>Maps listing</a> : '—'} />
+            </>
+          )}
         </Card>
 
         <Card title={`Audit — score ${lead.audit_score ?? '—'}/100`}>
@@ -120,6 +164,32 @@ export default function LeadDetail() {
         </Card>
       </div>
 
+      <Card title={`Notes${notes.length ? ` (${notes.length})` : ''}`}>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+          <textarea
+            value={noteText}
+            onChange={(e) => setNoteText(e.target.value)}
+            placeholder="Add a note…"
+            rows={2}
+            style={{ ...editInput, flex: 1, resize: 'vertical' }}
+          />
+          <button onClick={addNote} disabled={busy || !noteText.trim()} style={btn.secondary}>Add</button>
+        </div>
+        <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+          {notes.map((n) => (
+            <li key={n.id} style={{ padding: '8px 0', borderBottom: '1px solid rgba(148,163,184,0.08)', fontSize: 13 }}>
+              <div style={{ color: '#e2e8f0', whiteSpace: 'pre-wrap' }}>{n.body}</div>
+              <div style={{ ...sub, marginTop: 3 }}>
+                {n.author || 'admin'} · {new Date(n.created_at).toLocaleString()}
+                {' · '}
+                <button onClick={() => call('DELETE', `/notes/${n.id}`)} style={{ ...miniBtn, padding: '1px 6px' }}>delete</button>
+              </div>
+            </li>
+          ))}
+          {notes.length === 0 ? <li style={{ color: '#94a3b8' }}>no notes yet</li> : null}
+        </ul>
+      </Card>
+
       <Card title="Timeline">
         <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
           {events.map((e) => (
@@ -136,10 +206,13 @@ export default function LeadDetail() {
   );
 }
 
-function Card({ title, children }) {
+function Card({ title, children, action }) {
   return (
     <section style={{ ...adminStyles.tableSection, marginTop: 16 }}>
-      <h3 style={{ margin: '0 0 12px', fontSize: 16, color: '#f8fafc' }}>{title}</h3>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <h3 style={{ margin: 0, fontSize: 16, color: '#f8fafc' }}>{title}</h3>
+        {action || null}
+      </div>
       {children}
     </section>
   );
@@ -170,6 +243,8 @@ function Shot({ label, src }) {
 const grid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 16 };
 const a = { color: '#7dd3fc' };
 const sub = { color: '#64748b', fontSize: 12 };
+const editInput = { width: '100%', padding: '7px 10px', borderRadius: 8, background: 'rgba(2,6,23,0.6)', border: '1px solid rgba(148,163,184,0.22)', color: '#e2e8f0', fontSize: 13, marginTop: 3, boxSizing: 'border-box' };
+const miniBtn = { border: '1px solid rgba(148,163,184,0.25)', borderRadius: 8, padding: '4px 10px', background: 'rgba(15,23,42,0.9)', color: '#e2e8f0', cursor: 'pointer', fontSize: 12 };
 const btn = {
   secondary: { border: '1px solid rgba(148,163,184,0.25)', borderRadius: 12, padding: '10px 14px', background: 'rgba(15,23,42,0.9)', color: '#e2e8f0', cursor: 'pointer', fontWeight: 600, textDecoration: 'none', fontSize: 14 },
   danger: { border: '1px solid rgba(248,113,113,0.3)', borderRadius: 12, padding: '10px 14px', background: 'rgba(127,29,29,0.4)', color: '#fecaca', cursor: 'pointer', fontWeight: 600 },
