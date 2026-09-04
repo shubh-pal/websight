@@ -29,7 +29,7 @@ async function toDataUrl(key) {
   }
 }
 
-function duoMedia(url) {
+function mediaImg(url) {
   return url
     ? `<img src="${url}" />`
     : `<div class="placeholder" style="width:100%;height:100%"><span>no image yet</span></div>`;
@@ -65,22 +65,22 @@ function renderHtml({ lead, company, designSystem, mockup, before }) {
     .page-num { position: absolute; bottom: 28px; right: 32px; font-size: 12px; color: #a8a29e; z-index: 3; }
     .page-num.on-dark { color: rgba(255,255,255,0.5); }
 
-    .duo { position: absolute; inset: 0; z-index: 0; }
-    .duo img, .duo .placeholder { width: 100%; height: 100%; object-fit: cover; filter: grayscale(1) contrast(1.05); }
-    .duo-tint { position: absolute; inset: 0; mix-blend-mode: multiply; }
-    .duo-scrim { position: absolute; inset: 0; background: linear-gradient(0deg, rgba(20,17,15,0.94) 10%, rgba(20,17,15,0.15) 62%); }
-    .cover-text { position: relative; z-index: 2; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; color: #fff; }
-    .cover-text h1 { font-size: 54px; line-height: 1.06; max-width: 900px; color: #fff; }
-    .wordmark { position: absolute; top: 44px; left: 72px; z-index: 3; font-family: 'Fraunces', serif; font-weight: 600; font-size: 18px; color: #fff; }
+    /* Cover/close: image shown at full clarity in its own panel — never behind
+       text or a dark wash, so the actual design is always visible. */
+    .split-slide { display: flex; height: 100%; }
+    .split-text { flex: 0 0 44%; padding: 56px 52px; display: flex; flex-direction: column; justify-content: flex-end; color: #fff; position: relative; }
+    .split-text h1 { font-size: 42px; line-height: 1.1; color: #fff; }
+    .split-image { flex: 1; position: relative; background: #e7e5e0; overflow: hidden; }
+    .split-image img, .split-image .placeholder { width: 100%; height: 100%; object-fit: cover; object-position: top; display: block; }
+    .wordmark { position: absolute; top: 40px; left: 52px; z-index: 3; font-family: 'Fraunces', serif; font-weight: 600; font-size: 17px; color: #fff; }
 
     .filmstrip { display: flex; height: 100%; align-items: stretch; }
-    .filmstrip .panel { flex: 1; position: relative; }
-    .filmstrip .panel img, .filmstrip .panel .placeholder { width: 100%; height: 100%; object-fit: cover; filter: grayscale(0.15); }
-    .filmstrip .caption { position: absolute; bottom: 26px; left: 26px; z-index: 3; }
-    .filmstrip .caption .mono { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; font-family: 'Inter'; }
-    .filmstrip .caption .n { font-family: 'Fraunces', serif; font-size: 26px; color: #fff; }
-    .filmstrip .divider-arrow { width: 64px; background: #1c1917; display: flex; align-items: center; justify-content: center; color: #faf9f6; font-size: 22px; z-index: 3; }
-    .filmstrip .scrim { position: absolute; inset: 0; background: linear-gradient(0deg, rgba(0,0,0,0.55), transparent 50%); z-index: 2; }
+    .filmstrip .panel { flex: 1; position: relative; background: #e7e5e0; }
+    .filmstrip .panel img, .filmstrip .panel .placeholder { width: 100%; height: 100%; object-fit: cover; }
+    .filmstrip .caption { position: absolute; top: 20px; left: 20px; z-index: 3; background: rgba(20,17,15,0.85); padding: 8px 16px; border-radius: 999px; display: flex; align-items: baseline; gap: 8px; }
+    .filmstrip .caption .mono { font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; font-family: 'Inter'; color: rgba(255,255,255,0.65); }
+    .filmstrip .caption .n { font-family: 'Fraunces', serif; font-size: 15px; color: #fff; }
+    .filmstrip .divider-arrow { width: 56px; background: #1c1917; display: flex; align-items: center; justify-content: center; color: #faf9f6; font-size: 20px; z-index: 3; flex-shrink: 0; }
 
     .palette-strip { display: flex; height: 90px; border-radius: 4px; overflow: hidden; margin-top: 26px; }
     .palette-strip div { flex: 1; }
@@ -94,37 +94,33 @@ function renderHtml({ lead, company, designSystem, mockup, before }) {
     .price-fine { font-family: 'Fraunces', serif; font-size: 40px; }
   </style></head><body>
 
-  <!-- 1/5 Cover -->
+  <!-- 1/5 Cover — text panel + full-clarity image panel, never overlapping -->
   <div class="slide">
-    <div class="duo">${duoMedia(mockup)}</div>
-    <div class="duo-tint" style="background:${accent}"></div>
-    <div class="duo-scrim"></div>
-    <div class="wordmark">${esc(company.name || 'Your Agency')}</div>
-    <div class="cover-text pad">
-      <div class="kicker" style="color:rgba(255,255,255,0.7)">Redesign proposal &middot; ${esc(lead.name)}${location ? ` &middot; ${esc(location)}` : ''}</div>
-      <h1 class="serif">${esc(headline)}</h1>
-      <p style="color:rgba(255,255,255,0.65);margin-top:16px;max-width:560px">${esc(lead.category || '')}${lead.category ? ' &mdash; ' : ''}prepared exclusively for ${esc(lead.name)}.</p>
+    <div class="split-slide">
+      <div class="split-text" style="background:linear-gradient(165deg, ${accent}, #1c1917)">
+        <div class="wordmark">${esc(company.name || 'Your Agency')}</div>
+        <div class="kicker" style="color:rgba(255,255,255,0.7)">Redesign proposal &middot; ${esc(lead.name)}${location ? ` &middot; ${esc(location)}` : ''}</div>
+        <h1 class="serif">${esc(headline)}</h1>
+        <p style="color:rgba(255,255,255,0.65);margin-top:16px">${esc(lead.category || '')}${lead.category ? ' &mdash; ' : ''}prepared exclusively for ${esc(lead.name)}.</p>
+      </div>
+      <div class="split-image">${mediaImg(mockup)}</div>
     </div>
-    <div class="num-watermark" style="bottom:-70px;right:20px;color:rgba(255,255,255,0.06)">01</div>
     <div class="page-num on-dark">01 / 05</div>
   </div>
 
-  <!-- 2/5 Before/After filmstrip -->
+  <!-- 2/5 Before/After filmstrip — both images shown true color, side by side -->
   <div class="slide">
     <div class="filmstrip">
       <div class="panel">
-        <div class="scrim"></div>
-        ${duoMedia(before)}
-        <div class="caption"><div class="n serif">Before</div><div class="mono" style="color:rgba(255,255,255,0.7)">current site</div></div>
+        ${mediaImg(before)}
+        <div class="caption"><span class="n serif">Before</span><span class="mono">current site</span></div>
       </div>
       <div class="divider-arrow">&rarr;</div>
       <div class="panel">
-        <div class="scrim"></div>
-        ${duoMedia(mockup)}
-        <div class="caption"><div class="n serif">After</div><div class="mono" style="color:rgba(255,255,255,0.7)">the redesign</div></div>
+        ${mediaImg(mockup)}
+        <div class="caption"><span class="n serif">After</span><span class="mono">the redesign</span></div>
       </div>
     </div>
-    <div class="num-watermark" style="bottom:-60px;left:50%;transform:translateX(-50%);color:rgba(0,0,0,0.04)">02</div>
     <div class="page-num">02 / 05</div>
   </div>
 
@@ -170,16 +166,16 @@ function renderHtml({ lead, company, designSystem, mockup, before }) {
     <div class="page-num">04 / 05</div>
   </div>
 
-  <!-- 5/5 Close -->
+  <!-- 5/5 Close — mirrors the cover: full-clarity image, text never over it -->
   <div class="slide">
-    <div class="duo">${duoMedia(mockup)}</div>
-    <div class="duo-tint" style="background:${accent}"></div>
-    <div class="duo-scrim" style="background:linear-gradient(0deg, rgba(20,17,15,0.96) 30%, rgba(20,17,15,0.55) 100%)"></div>
-    <div class="cover-text pad" style="justify-content:center;align-items:flex-start">
-      <div class="kicker" style="color:rgba(255,255,255,0.6)">Ready when you are</div>
-      <h1 class="serif" style="font-size:42px;max-width:640px">Let's give ${esc(lead.name)} a site worthy of the work you already do.</h1>
-      <div style="margin-top:30px;font-size:15px;color:rgba(255,255,255,0.8);display:flex;gap:24px">
-        <span>${esc(company.name)}</span><span>${esc(company.contact_email)}</span><span>${esc(company.contact_phone)}</span><span>${esc(company.website)}</span>
+    <div class="split-slide">
+      <div class="split-image">${mediaImg(mockup)}</div>
+      <div class="split-text" style="background:linear-gradient(195deg, ${accent}, #1c1917); align-items:flex-start">
+        <div class="kicker" style="color:rgba(255,255,255,0.6)">Ready when you are</div>
+        <h1 class="serif" style="font-size:36px">Let's give ${esc(lead.name)} a site worthy of the work you already do.</h1>
+        <div style="margin-top:26px;font-size:14px;color:rgba(255,255,255,0.8);display:flex;flex-direction:column;gap:6px">
+          <span>${esc(company.name)}</span><span>${esc(company.contact_email)}</span><span>${esc(company.contact_phone)}</span><span>${esc(company.website)}</span>
+        </div>
       </div>
     </div>
     <div class="page-num on-dark">05 / 05</div>
