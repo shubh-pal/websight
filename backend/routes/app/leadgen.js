@@ -62,19 +62,40 @@ router.get('/leads/:id', async (req, res) => {
     [req.params.id]
   );
 
+  // Assets are streamed back through this API (works with plain ADC — no
+  // service-account signing key needed locally or on Cloud Run).
   const media = {};
   if (gcs.isEnabled) {
-    const shotKey = lead.audit_signals?.screenshot;
-    try {
-      if (shotKey) media.beforeScreenshot = await gcs.getSignedDownloadUrl(shotKey, 3600);
-      if (lead.mockup_gcs_key) media.mockup = await gcs.getSignedDownloadUrl(lead.mockup_gcs_key, 3600);
-      if (lead.proposal_gcs_key) media.proposalPdf = await gcs.getSignedDownloadUrl(lead.proposal_gcs_key, 3600);
-    } catch (err) {
-      media.error = `signed URL failed: ${err.message}`;
-    }
+    const asset = (key) => key ? `/api/app/leadgen/leads/${lead.id}/asset?key=${encodeURIComponent(key)}` : null;
+    media.beforeScreenshot = asset(lead.audit_signals?.screenshot);
+    media.mockup = asset(lead.mockup_gcs_key);
+    media.proposalPdf = asset(lead.proposal_gcs_key);
   }
 
   res.json({ lead, events, media });
+});
+
+// Stream a GCS object that belongs to this lead's folder.
+router.get('/leads/:id/asset', async (req, res) => {
+  if (!gcs.isEnabled) return res.status(503).json({ error: 'GCS not configured' });
+  const key = String(req.query.key || '');
+  const [lead] = await store.q(`SELECT id, gcs_prefix FROM leads WHERE id = $1`, [req.params.id]);
+  if (!lead) return res.status(404).json({ error: 'Lead not found' });
+  if (!key.startsWith(`companies/${lead.id}/`)) {
+    return res.status(400).json({ error: 'key outside lead folder' });
+  }
+  try {
+    const buf = await gcs.downloadBuffer(key);
+    if (!buf) return res.status(404).json({ error: 'asset not found' });
+    const ext = key.split('.').pop().toLowerCase();
+    const types = { webp: 'image/webp', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', pdf: 'application/pdf', json: 'application/json', html: 'text/html' };
+    res.set('Content-Type', types[ext] || 'application/octet-stream');
+    res.set('Cache-Control', 'private, max-age=300');
+    res.send(buf);
+  } catch (err) {
+    console.error('[app] asset stream error:', err.message);
+    res.status(502).json({ error: err.message });
+  }
 });
 
 // Close a lead from ANY stage — terminal, excluded from all pipeline ticks.

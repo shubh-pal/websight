@@ -9,9 +9,9 @@
  *
  * Requires DATABASE_URL (and GOOGLE_API_KEY for discover). Loads backend/.env.
  */
-require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
 async function main() {
   const [cmd, arg] = process.argv.slice(2);
