@@ -1,5 +1,6 @@
 /**
- * Builds the fixed-structure pitch PDF once a redesign mockup exists.
+ * Builds the pitch PDF as a 16:9 slide deck (1280x720 per slide, matches
+ * PowerPoint widescreen at 13.333in x 7.5in) once a redesign mockup exists.
  * Puppeteer only — no external API calls, no per-PDF cost.
  */
 const puppeteer = require('puppeteer');
@@ -24,9 +25,13 @@ async function toDataUrl(key) {
   }
 }
 
-function swatch(hex, label) {
-  if (!hex) return '';
-  return `<div class="swatch"><div class="chip" style="background:${esc(hex)}"></div><span>${esc(label)}</span></div>`;
+function darken(hex, amt = 0.55) {
+  if (!hex || !/^#([0-9a-f]{6})$/i.test(hex)) return '#0f172a';
+  const n = parseInt(hex.slice(1), 16);
+  const r = Math.round(((n >> 16) & 255) * amt);
+  const g = Math.round(((n >> 8) & 255) * amt);
+  const b = Math.round((n & 255) * amt);
+  return `rgb(${r},${g},${b})`;
 }
 
 function renderHtml({ lead, company, designSystem, mockup, before, leadLogo, companyLogo }) {
@@ -34,81 +39,176 @@ function renderHtml({ lead, company, designSystem, mockup, before, leadLogo, com
   const fonts = designSystem?.fonts || {};
   const verdict = lead.qualify_raw && !lead.qualify_raw.error ? lead.qualify_raw : null;
   const headline = verdict?.pitch_angle || `${lead.name}, your website is losing you customers.`;
-  const positioning = verdict?.summary || lead.audit_reasons || 'Your current site is holding your business back online.';
+  const positioning = verdict?.summary || 'Your current site is holding your business back online.';
   const reasons = (lead.audit_reasons || '').split(';').map((r) => r.trim()).filter(Boolean);
-  const accent = colors.primary || '#2563eb';
+  const accent = colors.primary || '#6366f1';
+  const accentDark = darken(accent, 0.35);
+  const fontImport = fonts.googleImport || "@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');";
+  const headingFont = fonts.heading ? `'${fonts.heading}', Inter, sans-serif` : "Inter, sans-serif";
+  const bodyFont = fonts.body ? `'${fonts.body}', Inter, sans-serif` : "Inter, sans-serif";
+  const location = [lead.city, lead.country].filter(Boolean).join(', ');
+  const priceRange = `$${company.price_min}–$${company.price_max}`;
 
   return `<!doctype html><html><head><meta charset="utf-8"><style>
+    ${fontImport}
     * { box-sizing: border-box; }
-    body { font-family: -apple-system, 'Segoe UI', Roboto, Arial, sans-serif; margin: 0; color: #0f172a; }
-    .page { width: 210mm; min-height: 297mm; padding: 16mm; page-break-after: always; position: relative; }
-    .page:last-child { page-break-after: auto; }
-    .eyebrow { text-transform: uppercase; letter-spacing: 0.12em; font-size: 11px; color: ${accent}; font-weight: 700; }
-    h1 { font-size: 30px; line-height: 1.15; margin: 8px 0 6px; letter-spacing: -0.02em; }
-    h2 { font-size: 20px; margin: 0 0 14px; letter-spacing: -0.01em; }
-    p { line-height: 1.6; font-size: 13.5px; color: #334155; }
-    .cover-shot { width: 100%; border-radius: 10px; border: 1px solid #e2e8f0; margin-top: 14px; max-height: 150mm; object-fit: cover; }
-    .brand-row { display: flex; justify-content: space-between; align-items: center; }
-    .brand-row img { height: 28px; object-fit: contain; }
-    ul.reasons { padding-left: 18px; }
-    ul.reasons li { font-size: 13.5px; color: #334155; margin-bottom: 6px; }
-    .before-after { display: flex; gap: 12px; margin-top: 14px; }
-    .before-after figure { flex: 1; margin: 0; }
-    .before-after img { width: 100%; border-radius: 8px; border: 1px solid #e2e8f0; }
-    .before-after figcaption { font-size: 11px; color: #64748b; margin-top: 4px; text-transform: uppercase; letter-spacing: 0.08em; }
-    .swatches { display: flex; gap: 10px; flex-wrap: wrap; margin: 12px 0; }
-    .swatch { text-align: center; font-size: 10px; color: #64748b; }
-    .chip { width: 30px; height: 30px; border-radius: 6px; border: 1px solid #e2e8f0; margin-bottom: 4px; }
-    .price-box { background: ${accent}12; border: 1px solid ${accent}33; border-radius: 12px; padding: 20px; margin-top: 20px; }
-    .price { font-size: 34px; font-weight: 800; color: ${accent}; }
-    .footer-contact { position: absolute; bottom: 16mm; left: 16mm; right: 16mm; border-top: 1px solid #e2e8f0; padding-top: 14px; display: flex; justify-content: space-between; font-size: 12px; color: #64748b; }
-    .cta { display: inline-block; margin-top: 16px; padding: 12px 22px; border-radius: 10px; background: ${accent}; color: #fff; font-weight: 700; text-decoration: none; font-size: 14px; }
+    html, body { margin: 0; padding: 0; }
+    body { font-family: ${bodyFont}; color: #0f172a; }
+    .slide {
+      width: 1280px; height: 720px; position: relative; overflow: hidden;
+      page-break-after: always; background: #ffffff;
+    }
+    .slide:last-child { page-break-after: auto; }
+    .pad { padding: 64px 72px; height: 100%; box-sizing: border-box; }
+    h1, h2, h3 { font-family: ${headingFont}; margin: 0; letter-spacing: -0.02em; }
+    .eyebrow { text-transform: uppercase; letter-spacing: 0.16em; font-size: 13px; font-weight: 700; color: ${accent}; }
+    .eyebrow.light { color: rgba(255,255,255,0.85); }
+    p { font-family: ${bodyFont}; line-height: 1.6; font-size: 17px; color: #475569; margin: 0; }
+
+    /* ---- Slide 1: Cover ---- */
+    .cover { color: #fff; background: linear-gradient(135deg, ${accentDark}, #0f172a); }
+    .cover-bg { position: absolute; inset: 0; }
+    .cover-bg img { width: 100%; height: 100%; object-fit: cover; opacity: 0.34; }
+    .cover-scrim { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(15,23,42,0.15) 0%, rgba(15,23,42,0.92) 78%); }
+    .cover-content { position: relative; z-index: 2; display: flex; flex-direction: column; justify-content: flex-end; height: 100%; }
+    .cover-content h1 { font-size: 52px; color: #fff; line-height: 1.08; max-width: 980px; margin: 18px 0 14px; }
+    .cover-content .meta { font-size: 16px; color: rgba(255,255,255,0.75); }
+    .brand-row { position: absolute; top: 40px; left: 72px; right: 72px; z-index: 3; display: flex; justify-content: space-between; align-items: center; }
+    .brand-row img { height: 30px; object-fit: contain; filter: brightness(0) invert(1); }
+    .brand-row .agency-name { color: #fff; font-weight: 700; font-size: 15px; }
+
+    /* ---- Section header used on inner slides ---- */
+    .section-head { margin-bottom: 30px; }
+    .section-head h2 { font-size: 34px; margin-top: 8px; color: #0f172a; }
+
+    /* ---- Slide 2: What we noticed ---- */
+    .split { display: flex; height: 100%; }
+    .split .left { flex: 0 0 46%; background: #0f172a; position: relative; }
+    .split .left img { width: 100%; height: 100%; object-fit: cover; opacity: 0.9; }
+    .split .right { flex: 1; padding: 64px 56px; display: flex; flex-direction: column; justify-content: center; }
+    .reason-card { display: flex; gap: 14px; align-items: flex-start; margin-bottom: 18px; }
+    .reason-dot { width: 10px; height: 10px; border-radius: 50%; background: ${accent}; margin-top: 7px; flex-shrink: 0; }
+    .reason-card p { font-size: 17px; color: #1e293b; }
+
+    /* ---- Slide 3: Brand direction ---- */
+    .swatch-row { display: flex; gap: 14px; margin: 26px 0 22px; flex-wrap: wrap; }
+    .swatch { text-align: center; }
+    .chip { width: 56px; height: 56px; border-radius: 12px; border: 1px solid #e2e8f0; margin-bottom: 6px; }
+    .swatch span { font-size: 11px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.06em; }
+    .type-sample { display: flex; gap: 40px; margin-top: 16px; }
+    .type-sample div span { display: block; font-size: 11px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 4px; }
+    .type-sample div strong { font-size: 26px; }
+
+    /* ---- Slide 4: Before / After ---- */
+    .ba { display: flex; height: 100%; }
+    .ba figure { flex: 1; margin: 0; position: relative; }
+    .ba img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .ba figcaption { position: absolute; top: 24px; left: 24px; padding: 6px 16px; border-radius: 999px; font-size: 12px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; }
+    .ba .before figcaption { background: rgba(15,23,42,0.75); color: #fff; }
+    .ba .after figcaption { background: ${accent}; color: #fff; }
+    .ba-divider { width: 4px; background: ${accent}; }
+
+    /* ---- Slide 5: Scope ---- */
+    .scope { background: linear-gradient(135deg, ${accentDark}, #0f172a); color: #fff; display: flex; align-items: center; }
+    .scope-inner { padding: 0 72px; width: 100%; }
+    .scope .price { font-size: 96px; font-weight: 800; letter-spacing: -0.03em; margin: 14px 0 10px; }
+    .scope .tagline { font-size: 19px; color: rgba(255,255,255,0.85); max-width: 640px; }
+    .scope-facts { display: flex; gap: 40px; margin-top: 34px; }
+    .scope-facts div { font-size: 15px; color: rgba(255,255,255,0.9); }
+    .scope-facts strong { display: block; font-size: 22px; margin-bottom: 4px; }
+
+    /* ---- Slide 6: Contact / CTA ---- */
+    .cta-slide { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; text-align: center; }
+    .cta-slide img.logo { height: 46px; object-fit: contain; margin-bottom: 28px; }
+    .cta-slide h1 { font-size: 44px; max-width: 780px; }
+    .cta-btn { margin-top: 30px; padding: 16px 34px; border-radius: 12px; background: ${accent}; color: #fff; font-weight: 700; font-size: 17px; text-decoration: none; }
+    .contact-row { margin-top: 34px; font-size: 15px; color: #64748b; display: flex; gap: 22px; }
   </style></head><body>
 
-  <div class="page">
+  <!-- Slide 1: Cover -->
+  <div class="slide cover">
     <div class="brand-row">
-      ${companyLogo ? `<img src="${companyLogo}" />` : `<strong>${esc(company.name || 'Website Redesign')}</strong>`}
-      <span class="eyebrow">Website Redesign Proposal</span>
+      ${companyLogo ? `<img src="${companyLogo}" />` : `<span class="agency-name">${esc(company.name || 'Website Redesign')}</span>`}
+      <span class="eyebrow light">Website Redesign Proposal</span>
     </div>
-    <h1>${esc(headline)}</h1>
-    <p>Prepared for <strong>${esc(lead.name)}</strong> — ${esc([lead.city, lead.country].filter(Boolean).join(', '))}</p>
-    ${mockup ? `<img class="cover-shot" src="${mockup}" />` : ''}
+    <div class="cover-bg">${mockup ? `<img src="${mockup}" />` : ''}</div>
+    <div class="cover-scrim"></div>
+    <div class="cover-content pad">
+      <span class="eyebrow light">Prepared for ${esc(lead.name)}${location ? ` · ${esc(location)}` : ''}</span>
+      <h1>${esc(headline)}</h1>
+      <span class="meta">${esc(lead.category || '')}</span>
+    </div>
   </div>
 
-  <div class="page">
-    <div class="eyebrow">What we noticed</div>
-    <h2>Your current site, as visitors see it</h2>
-    ${reasons.length ? `<ul class="reasons">${reasons.map((r) => `<li>${esc(r)}</li>`).join('')}</ul>` : `<p>${esc(positioning)}</p>`}
-    ${before ? `<img class="cover-shot" src="${before}" style="max-height:110mm" />` : ''}
+  <!-- Slide 2: What we noticed -->
+  <div class="slide">
+    <div class="split">
+      <div class="left">${before ? `<img src="${before}" />` : ''}</div>
+      <div class="right">
+        <div class="eyebrow">What we noticed</div>
+        <h2 style="font-size:32px;margin:10px 0 26px">Your site today</h2>
+        ${reasons.length
+          ? reasons.map((r) => `<div class="reason-card"><div class="reason-dot"></div><p>${esc(r)}</p></div>`).join('')
+          : `<p>${esc(positioning)}</p>`}
+      </div>
+    </div>
   </div>
 
-  <div class="page">
-    <div class="eyebrow">Brand direction</div>
-    <h2>Where we'd take it</h2>
-    <p>${esc(positioning)}</p>
-    ${Object.keys(colors).length ? `<div class="swatches">${Object.entries(colors).filter(([, v]) => v).map(([k, v]) => swatch(v, k)).join('')}</div>` : ''}
-    ${fonts.heading ? `<p>Typography — heading: <strong>${esc(fonts.heading)}</strong>, body: <strong>${esc(fonts.body || fonts.heading)}</strong></p>` : ''}
-    <div class="before-after">
-      <figure>${before ? `<img src="${before}" />` : ''}<figcaption>Before</figcaption></figure>
-      <figure>${mockup ? `<img src="${mockup}" />` : ''}<figcaption>After</figcaption></figure>
+  <!-- Slide 3: Brand direction -->
+  <div class="slide">
+    <div class="pad">
+      <div class="section-head">
+        <div class="eyebrow">Brand direction</div>
+        <h2>Where we'd take it</h2>
+      </div>
+      <p style="max-width:820px;font-size:18px">${esc(positioning)}</p>
+      ${Object.keys(colors).length ? `
+        <div class="swatch-row">
+          ${Object.entries(colors).filter(([, v]) => v).map(([k, v]) => `<div class="swatch"><div class="chip" style="background:${esc(v)}"></div><span>${esc(k)}</span></div>`).join('')}
+        </div>` : ''}
+      ${fonts.heading ? `
+        <div class="type-sample">
+          <div><span>Heading</span><strong style="font-family:${headingFont}">${esc(fonts.heading)}</strong></div>
+          <div><span>Body</span><strong style="font-family:${bodyFont};font-weight:400">${esc(fonts.body || fonts.heading)}</strong></div>
+        </div>` : ''}
     </div>
-    ${leadLogo ? `<p style="margin-top:14px">Current logo on file:</p><img src="${leadLogo}" style="max-height:60px;background:#fff;padding:8px;border-radius:8px;border:1px solid #e2e8f0" />` : ''}
   </div>
 
-  <div class="page">
-    <div class="eyebrow">Scope &amp; investment</div>
-    <h2>Fixed price, fast delivery</h2>
-    <p>${esc(company.tagline)}</p>
-    <div class="price-box">
-      <div class="price">$${company.price_min}–$${company.price_max}</div>
-      <p>Delivered in ~${company.delivery_days} days · fully responsive · built on your current brand</p>
+  <!-- Slide 4: Before / After -->
+  <div class="slide">
+    <div class="ba">
+      <figure class="before">${before ? `<img src="${before}" />` : ''}<figcaption>Before</figcaption></figure>
+      <div class="ba-divider"></div>
+      <figure class="after">${mockup ? `<img src="${mockup}" />` : ''}<figcaption>After</figcaption></figure>
     </div>
-    <div class="eyebrow" style="margin-top:28px">Next step</div>
-    <p>Reply to this email or reach out below and we'll lock in a start date.</p>
-    <a class="cta" href="mailto:${esc(company.contact_email)}">Get started</a>
-    <div class="footer-contact">
-      <span>${esc(company.name)} ${company.website ? `· ${esc(company.website)}` : ''}</span>
-      <span>${esc(company.contact_email)} ${company.contact_phone ? `· ${esc(company.contact_phone)}` : ''}</span>
+  </div>
+
+  <!-- Slide 5: Scope & investment -->
+  <div class="slide scope">
+    <div class="scope-inner">
+      <span class="eyebrow light">Scope &amp; investment</span>
+      <div class="price">${priceRange}</div>
+      <p class="tagline">${esc(company.tagline)}</p>
+      <div class="scope-facts">
+        <div><strong>~${company.delivery_days} days</strong>delivery</div>
+        <div><strong>Fully responsive</strong>desktop, tablet, mobile</div>
+        <div><strong>Your brand</strong>built on what you already have</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Slide 6: Contact / CTA -->
+  <div class="slide">
+    <div class="cta-slide">
+      ${companyLogo ? `<img class="logo" src="${companyLogo}" />` : ''}
+      <h1>Let's build ${esc(lead.name)} a website that works as hard as you do.</h1>
+      <a class="cta-btn" href="mailto:${esc(company.contact_email)}">Get started</a>
+      <div class="contact-row">
+        <span>${esc(company.name)}</span>
+        ${company.website ? `<span>${esc(company.website)}</span>` : ''}
+        <span>${esc(company.contact_email)}</span>
+        ${company.contact_phone ? `<span>${esc(company.contact_phone)}</span>` : ''}
+      </div>
     </div>
   </div>
 
@@ -141,8 +241,13 @@ async function buildProposalPdf(leadId) {
   const browser = await puppeteer.launch({ headless: 'new', args: ['--no-sandbox', '--disable-setuid-sandbox'] });
   try {
     const page = await browser.newPage();
+    await page.setViewport({ width: 1280, height: 720 });
     await page.setContent(html, { waitUntil: 'networkidle0', timeout: 30000 });
-    const pdfBuffer = await page.pdf({ format: 'A4', printBackground: true, margin: { top: 0, bottom: 0, left: 0, right: 0 } });
+    // Widescreen slide size (1280x720 @ 96dpi = 13.333in x 7.5in, PowerPoint widescreen).
+    const pdfBuffer = await page.pdf({
+      width: '1280px', height: '720px', printBackground: true,
+      margin: { top: 0, bottom: 0, left: 0, right: 0 }, preferCSSPageSize: false,
+    });
     const key = `companies/${leadId}/proposal.pdf`;
     if (gcs.isEnabled) await gcs.uploadFile(key, pdfBuffer, 'application/pdf');
     return { proposalKey: key, bytes: pdfBuffer.length };
