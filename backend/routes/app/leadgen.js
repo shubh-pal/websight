@@ -130,15 +130,67 @@ router.get('/leads/:id', async (req, res) => {
 
   // Assets are streamed back through this API (works with plain ADC — no
   // service-account signing key needed locally or on Cloud Run).
+  const manual = lead.manual_assets || {};
+  const sig = lead.audit_signals || {};
   const media = {};
+  let designSystem = null;
   if (gcs.isEnabled) {
     const asset = (key) => key ? `/api/app/leadgen/leads/${lead.id}/asset?key=${encodeURIComponent(key)}` : null;
-    media.beforeScreenshot = asset(lead.audit_signals?.screenshot);
+    const screenshotKey = manual.screenshot || sig.screenshot;
+    const logoKey = manual.logo || sig.logo;
+    media.beforeScreenshot = asset(screenshotKey);
+    media.screenshotIsManual = !!manual.screenshot;
+    media.logo = asset(logoKey);
+    media.logoIsManual = !!manual.logo;
+    media.logoSourceUrl = sig.logo_url || null;
     media.mockup = asset(lead.mockup_gcs_key);
     media.proposalPdf = asset(lead.proposal_gcs_key);
+    if (lead.gcs_prefix) {
+      const root = lead.gcs_prefix.replace(/\/scrape$/, ''); // tolerate older rows
+      const dsKey = `${root}/scrape/data/design-system.json`;
+      media.designSystemJson = asset(dsKey);
+      try { designSystem = await gcs.readJson(dsKey); } catch (_) { /* ignore */ }
+    }
   }
 
-  res.json({ lead, events, media, notes });
+  res.json({ lead, events, media, notes, designSystem });
+});
+
+// Upload / replace a lead asset. Body: { kind: 'screenshot'|'logo', filename, dataBase64 }
+const ASSET_EXT = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', svg: 'image/svg+xml', gif: 'image/gif' };
+router.post('/leads/:id/asset', async (req, res) => {
+  if (!gcs.isEnabled) return res.status(503).json({ error: 'GCS not configured' });
+  const { kind, filename, dataBase64 } = req.body || {};
+  if (!['screenshot', 'logo'].includes(kind)) return res.status(400).json({ error: "kind must be 'screenshot' or 'logo'" });
+  if (!dataBase64) return res.status(400).json({ error: 'dataBase64 required' });
+
+  const ext = String(filename || '').split('.').pop().toLowerCase();
+  const contentType = ASSET_EXT[ext];
+  if (!contentType) return res.status(400).json({ error: `unsupported file type: .${ext}` });
+
+  const [lead] = await store.q(`SELECT id, manual_assets FROM leads WHERE id = $1`, [req.params.id]);
+  if (!lead) return res.status(404).json({ error: 'Lead not found' });
+
+  const buf = Buffer.from(dataBase64.replace(/^data:[^,]+,/, ''), 'base64');
+  if (buf.length > 8 * 1024 * 1024) return res.status(413).json({ error: 'file over 8 MB' });
+
+  const key = `companies/${lead.id}/manual/${kind}.${ext === 'jpeg' ? 'jpg' : ext}`;
+  await gcs.uploadFile(key, buf, contentType);
+  await store.updateLead(lead.id, { manual_assets: { ...(lead.manual_assets || {}), [kind]: key } });
+  await store.recordEvent(lead.id, null, null, { uploaded: kind, by: req.user?.email || 'admin' });
+  res.json({ ok: true, kind, key });
+});
+
+// Remove a manual asset override (revert to the scraped one).
+router.delete('/leads/:id/asset/:kind', async (req, res) => {
+  const { kind } = req.params;
+  if (!['screenshot', 'logo'].includes(kind)) return res.status(400).json({ error: 'bad kind' });
+  const [lead] = await store.q(`SELECT id, manual_assets FROM leads WHERE id = $1`, [req.params.id]);
+  if (!lead) return res.status(404).json({ error: 'Lead not found' });
+  const next = { ...(lead.manual_assets || {}) };
+  delete next[kind];
+  await store.updateLead(lead.id, { manual_assets: next });
+  res.json({ ok: true });
 });
 
 // Edit lead fields (website, name, contact, address, category, ...).

@@ -121,6 +121,11 @@ ALTER TABLE leads     ADD COLUMN IF NOT EXISTS niche_id UUID REFERENCES niches(i
 ALTER TABLE lead_runs ADD COLUMN IF NOT EXISTS niche_id UUID REFERENCES niches(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS leads_niche_idx ON leads(niche_id);
 
+-- Manually uploaded / overridden assets: { "screenshot": "<gcs key>", "logo": "<gcs key>" }
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS manual_assets JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS score_override INTEGER;      -- set on manual review
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS score_override_by TEXT;
+
 -- Free-text notes on a lead (timestamped log).
 CREATE TABLE IF NOT EXISTS lead_notes (
   id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),

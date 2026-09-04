@@ -68,13 +68,26 @@ export default function LeadDetail() {
     if (!body) return;
     if (await call('POST', '/notes', { body })) setNoteText('');
   }
+  async function uploadAsset(kind, file) {
+    if (!file) return;
+    if (file.size > 8 * 1024 * 1024) { alert('File over 8 MB'); return; }
+    const dataBase64 = await new Promise((res) => {
+      const r = new FileReader();
+      r.onload = () => res(r.result);
+      r.readAsDataURL(file);
+    });
+    await call('POST', '/asset', { kind, filename: file.name, dataBase64 });
+  }
 
   if (loading) return <AdminLayout title="Lead"><div style={adminStyles.loadingCard}>Loading…</div></AdminLayout>;
   if (error) return <AdminLayout title="Lead"><div style={adminStyles.errorCard}>{error}</div></AdminLayout>;
 
-  const { lead, events, media = {}, notes = [] } = data;
+  const { lead, events, media = {}, notes = [], designSystem } = data;
   const sig = lead.audit_signals || {};
   const auditing = ['scraping', 'auditing'].includes(lead.status);
+  const ds = designSystem || {};
+  const dsColors = ds.colors || {};
+  const dsFonts = ds.fonts || {};
 
   return (
     <AdminLayout
@@ -155,9 +168,57 @@ export default function LeadDetail() {
         </Card>
 
         <Card title="Assets">
-          {media.beforeScreenshot
-            ? <Shot label="Current site" src={media.beforeScreenshot} />
-            : <div style={{ color: '#94a3b8' }}>no screenshot {data.media?.error ? `(${data.media.error})` : ''}</div>}
+          {/* Screenshot */}
+          <div style={assetBlock}>
+            <div style={assetHead}>
+              <span>Current site screenshot {media.screenshotIsManual ? <em style={tag}>manual</em> : media.beforeScreenshot ? <em style={tag}>scraped</em> : null}</span>
+              <span>
+                <UploadBtn label={media.beforeScreenshot ? 'Replace' : 'Upload'} accept="image/*" onFile={(f) => uploadAsset('screenshot', f)} />
+                {media.screenshotIsManual ? <button onClick={() => call('DELETE', '/asset/screenshot')} style={miniBtn}>revert</button> : null}
+              </span>
+            </div>
+            {media.beforeScreenshot
+              ? <a href={media.beforeScreenshot} target="_blank" rel="noreferrer"><img src={media.beforeScreenshot} alt="screenshot" style={assetImg} /></a>
+              : <div style={assetEmpty}>no screenshot — upload one</div>}
+          </div>
+
+          {/* Logo — always shown */}
+          <div style={assetBlock}>
+            <div style={assetHead}>
+              <span>Logo {media.logoIsManual ? <em style={tag}>manual</em> : media.logo ? <em style={tag}>scraped</em> : <em style={{ ...tag, color: '#fca5a5', borderColor: '#fca5a5' }}>required</em>}</span>
+              <span>
+                <UploadBtn label={media.logo ? 'Replace' : 'Upload'} accept="image/*" onFile={(f) => uploadAsset('logo', f)} />
+                {media.logoIsManual ? <button onClick={() => call('DELETE', '/asset/logo')} style={miniBtn}>revert</button> : null}
+              </span>
+            </div>
+            {media.logo
+              ? <a href={media.logo} target="_blank" rel="noreferrer"><img src={media.logo} alt="logo" style={{ ...assetImg, maxHeight: 90, objectFit: 'contain', background: '#fff', padding: 8 }} /></a>
+              : <div style={assetEmpty}>{media.logoSourceUrl ? 'scrape found a logo URL but could not mirror it — upload manually' : 'no logo — upload one'}</div>}
+          </div>
+
+          {/* Design system */}
+          <div style={assetBlock}>
+            <div style={assetHead}>
+              <span>Design system {ds.category ? <em style={tag}>{ds.category}</em> : null}</span>
+              {media.designSystemJson ? <a href={media.designSystemJson} target="_blank" rel="noreferrer" style={{ ...miniBtn, textDecoration: 'none' }}>raw JSON</a> : null}
+            </div>
+            {Object.keys(dsColors).length ? (
+              <>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+                  {Object.entries(dsColors).filter(([, v]) => v).map(([name, hex]) => (
+                    <div key={name} title={`${name}: ${hex}`} style={{ textAlign: 'center' }}>
+                      <div style={{ width: 40, height: 40, borderRadius: 8, background: hex, border: '1px solid rgba(148,163,184,0.3)' }} />
+                      <div style={{ ...sub, fontSize: 10 }}>{name}</div>
+                    </div>
+                  ))}
+                </div>
+                <div style={sub}>
+                  Fonts — heading: <strong style={{ color: '#cbd5e1' }}>{dsFonts.heading || '—'}</strong>, body: <strong style={{ color: '#cbd5e1' }}>{dsFonts.body || '—'}</strong>
+                </div>
+              </>
+            ) : <div style={assetEmpty}>{lead.gcs_prefix ? 'design system not parsed' : 'not scraped yet'}</div>}
+          </div>
+
           {media.mockup ? <Shot label="Redesign mockup" src={media.mockup} /> : null}
           {media.proposalPdf ? <a href={media.proposalPdf} target="_blank" rel="noreferrer" style={{ ...btn.secondary, display: 'inline-block', marginTop: 10 }}>Open proposal PDF</a> : null}
           {lead.gcs_prefix ? <div style={{ ...sub, marginTop: 8 }}>GCS: {lead.gcs_prefix}</div> : null}
@@ -229,6 +290,19 @@ function Pill({ ok, label }) {
   const c = ok ? '#22c55e' : '#ef4444';
   return <span style={{ fontSize: 12, padding: '3px 8px', borderRadius: 999, color: c, background: `${c}22`, border: `1px solid ${c}44` }}>{label}</span>;
 }
+function UploadBtn({ label, accept, onFile }) {
+  return (
+    <label style={{ ...miniBtn, display: 'inline-block' }}>
+      {label}
+      <input
+        type="file"
+        accept={accept}
+        style={{ display: 'none' }}
+        onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; onFile(f); }}
+      />
+    </label>
+  );
+}
 function Shot({ label, src }) {
   return (
     <figure style={{ margin: '0 0 14px' }}>
@@ -244,7 +318,12 @@ const grid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(32
 const a = { color: '#7dd3fc' };
 const sub = { color: '#64748b', fontSize: 12 };
 const editInput = { width: '100%', padding: '7px 10px', borderRadius: 8, background: 'rgba(2,6,23,0.6)', border: '1px solid rgba(148,163,184,0.22)', color: '#e2e8f0', fontSize: 13, marginTop: 3, boxSizing: 'border-box' };
-const miniBtn = { border: '1px solid rgba(148,163,184,0.25)', borderRadius: 8, padding: '4px 10px', background: 'rgba(15,23,42,0.9)', color: '#e2e8f0', cursor: 'pointer', fontSize: 12 };
+const miniBtn = { border: '1px solid rgba(148,163,184,0.25)', borderRadius: 8, padding: '4px 10px', background: 'rgba(15,23,42,0.9)', color: '#e2e8f0', cursor: 'pointer', fontSize: 12, marginLeft: 6 };
+const assetBlock = { padding: '10px 0', borderBottom: '1px solid rgba(148,163,184,0.1)' };
+const assetHead = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 13, color: '#cbd5e1', marginBottom: 8, gap: 8 };
+const assetImg = { width: '100%', borderRadius: 10, border: '1px solid rgba(148,163,184,0.16)', display: 'block' };
+const assetEmpty = { color: '#94a3b8', fontSize: 12, padding: '10px 12px', background: 'rgba(2,6,23,0.4)', borderRadius: 8 };
+const tag = { fontStyle: 'normal', fontSize: 10, padding: '1px 6px', borderRadius: 999, border: '1px solid rgba(148,163,184,0.35)', color: '#94a3b8', marginLeft: 6 };
 const btn = {
   secondary: { border: '1px solid rgba(148,163,184,0.25)', borderRadius: 12, padding: '10px 14px', background: 'rgba(15,23,42,0.9)', color: '#e2e8f0', cursor: 'pointer', fontWeight: 600, textDecoration: 'none', fontSize: 14 },
   danger: { border: '1px solid rgba(248,113,113,0.3)', borderRadius: 12, padding: '10px 14px', background: 'rgba(127,29,29,0.4)', color: '#fecaca', cursor: 'pointer', fontWeight: 600 },

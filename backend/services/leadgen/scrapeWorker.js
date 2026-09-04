@@ -56,26 +56,56 @@ async function scrapeLead(lead) {
   const designSystem = getDesignSystem(siteData, siteData.siteType || 'other');
   const { files, manifest } = buildScrapeArtifacts(siteData, designSystem, lead.website);
 
-  let gcsPrefix = null;
+  let uploaded = false;
+  let logoKey = null;
   if (gcs.isEnabled) {
-    gcsPrefix = await gcs.uploadArtifacts(`${prefix}/scrape`, files);
+    await gcs.uploadArtifacts(`${prefix}/scrape`, files);
+    logoKey = await mirrorLogo(siteData.logoUrl, `${prefix}/scrape/assets`);
+    uploaded = true;
   }
 
   const email = lead.contact_email || extractEmail(siteData);
 
   await store.updateLead(lead.id, {
     status: 'scraped',
-    gcs_prefix: gcsPrefix,
+    gcs_prefix: uploaded ? prefix : null,   // company root; bundle lives under <prefix>/scrape/
     contact_email: email,
     audit_signals: {
       has_website: true,
       final_url: siteData.url,
       source: siteData.source,
       screenshot: manifest.files.screenshot ? `${prefix}/scrape/assets/original-screenshot.webp` : null,
+      logo: logoKey,
+      logo_url: siteData.logoUrl || null,
     },
   });
-  await store.recordEvent(lead.id, lead.status, 'scraped', { gcsPrefix, email: !!email, gcsEnabled: gcs.isEnabled });
-  return { hasWebsite: true, gcsPrefix, email };
+  await store.recordEvent(lead.id, lead.status, 'scraped', { gcsPrefix: prefix, email: !!email, gcsEnabled: gcs.isEnabled });
+  return { hasWebsite: true, gcsPrefix: prefix, email };
 }
 
-module.exports = { scrapeLead, extractEmail };
+const LOGO_EXT = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/svg+xml': 'svg', 'image/gif': 'gif', 'image/x-icon': 'ico', 'image/vnd.microsoft.icon': 'ico' };
+
+/** Fetch the site's logo and mirror it into GCS. Returns the key or null. */
+async function mirrorLogo(logoUrl, destDir) {
+  if (!logoUrl) return null;
+  try {
+    if (assertSafePublicUrl) await assertSafePublicUrl(logoUrl);
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 10000);
+    const resp = await fetch(logoUrl, { signal: ctrl.signal });
+    clearTimeout(t);
+    if (!resp.ok) return null;
+    const ct = (resp.headers.get('content-type') || '').split(';')[0].trim();
+    const ext = LOGO_EXT[ct] || (logoUrl.split('.').pop().split(/[?#]/)[0].toLowerCase().match(/^(png|jpe?g|webp|svg|gif|ico)$/)?.[0]) || null;
+    if (!ext) return null;
+    const buf = Buffer.from(await resp.arrayBuffer());
+    if (buf.length > 5 * 1024 * 1024) return null;
+    const key = `${destDir}/logo.${ext === 'jpeg' ? 'jpg' : ext}`;
+    await gcs.uploadFile(key, buf, ct || 'application/octet-stream');
+    return key;
+  } catch (_) {
+    return null;
+  }
+}
+
+module.exports = { scrapeLead, extractEmail, mirrorLogo };

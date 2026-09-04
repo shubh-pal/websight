@@ -74,7 +74,7 @@ async function claimLeads(fromStatus, toStatus, limit) {
 async function updateLead(id, patch) {
   const keys = Object.keys(patch);
   if (!keys.length) return;
-  const JSONB_COLS = new Set(['audit_signals', 'qualify_raw', 'redesign_concept', 'attempts']);
+  const JSONB_COLS = new Set(['audit_signals', 'qualify_raw', 'redesign_concept', 'attempts', 'manual_assets']);
   const sets = keys
     .map((k, i) => `${k} = $${i + 2}${JSONB_COLS.has(k) ? '::jsonb' : ''}`)
     .join(', ');
@@ -109,7 +109,7 @@ async function markError(lead, stage, err) {
   await recordEvent(lead.id, lead.status, 'error', { stage });
 }
 
-const EDITABLE_LEAD_COLS = ['name', 'website', 'contact_email', 'phone', 'phone_intl', 'address', 'category', 'city', 'country', 'rating', 'reviews'];
+const EDITABLE_LEAD_COLS = ['name', 'website', 'contact_email', 'phone', 'phone_intl', 'address', 'category', 'city', 'country', 'rating', 'reviews', 'score_override', 'score_override_by'];
 
 async function editLead(id, patch) {
   const keys = Object.keys(patch).filter((k) => EDITABLE_LEAD_COLS.includes(k));
