@@ -30,7 +30,7 @@
   .split-text { flex: 0 0 44%; padding: 56px 52px; display: flex; flex-direction: column; justify-content: flex-end; color: #fff; position: relative; }
   .split-text h1 { font-size: 42px; line-height: 1.1; color: #fff; }
   .split-image { flex: 1; position: relative; background: #e7e5e0; overflow: hidden; }
-  .split-image img, .split-image .placeholder { width: 100%; height: 100%; object-fit: cover; object-position: top; display: block; }
+  .split-image img { width: 100%; height: 100%; object-fit: contain; display: block; } .split-image .placeholder { width: 100%; height: 100%; }
   .wordmark { position: absolute; top: 40px; left: 52px; z-index: 3; font-family: 'Fraunces', serif; font-weight: 600; font-size: 17px; color: #fff; }
 
   /* Gauge (audit score) */
@@ -43,7 +43,7 @@
   /* Filmstrip before/after — both images shown true color */
   .filmstrip { display: flex; height: 100%; align-items: stretch; }
   .filmstrip .panel { flex: 1; position: relative; background: #e7e5e0; }
-  .filmstrip .panel img, .filmstrip .panel .placeholder { width: 100%; height: 100%; object-fit: cover; }
+  .filmstrip .panel img { width: 100%; height: 100%; object-fit: contain; } .filmstrip .panel .placeholder { width: 100%; height: 100%; }
   .filmstrip .caption { position: absolute; top: 20px; left: 20px; z-index: 3; background: rgba(20,17,15,0.85); padding: 8px 16px; border-radius: 999px; display: flex; align-items: baseline; gap: 8px; }
   .filmstrip .caption .mono { font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: rgba(255,255,255,0.65); }
   .filmstrip .caption .n { font-family: 'Fraunces', serif; font-size: 15px; color: #fff; }
