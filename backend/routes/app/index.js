@@ -12,6 +12,7 @@ const requireAdmin = require('../../middleware/requireAdmin');
 const requireCronSecret = require('../../middleware/requireCronSecret');
 const db = require('../../db');
 const gcs = require('../../services/gcsStorage');
+const pipeline = require('../../services/leadgen/pipeline');
 
 const router = express.Router();
 
@@ -20,8 +21,13 @@ const automation = express.Router();
 automation.use(requireCronSecret);
 
 automation.post('/cron/tick', async (req, res) => {
-  // Phase B fills this in: advance N leads per stage.
-  res.json({ ok: true, advanced: {}, note: 'tick handler not yet implemented' });
+  try {
+    const advanced = await pipeline.tick(req.body?.limits || {});
+    res.json({ ok: true, advanced });
+  } catch (err) {
+    console.error('[app] cron tick error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 router.use(automation);
@@ -52,8 +58,8 @@ router.get('/pipeline/summary', async (req, res) => {
   }
 });
 
-// Phase B+: router.use('/leadgen', require('./leadgen'));
-//           router.use('/qualify', require('./qualify'));
+router.use('/leadgen', require('./leadgen'));
+// Phase C+: router.use('/qualify', require('./qualify'));
 //           router.use('/proposals', require('./proposals'));
 
 module.exports = router;
