@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import AdminLayout, { adminStyles } from '../../components/AdminLayout';
 import { STAGE_ORDER, StageBadge, fmtDate } from './pipelineShared';
+import RunDiscoveryModal from './RunDiscoveryModal';
 
 const API = '/api/app/leadgen';
 
@@ -12,8 +13,10 @@ export default function LeadsPipeline() {
   const [error, setError] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [countryFilter, setCountryFilter] = useState('all');
+  const [nicheFilter, setNicheFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [busy, setBusy] = useState(false);
+  const [showDiscovery, setShowDiscovery] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -34,23 +37,6 @@ export default function LeadsPipeline() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
-
-  async function runDiscovery() {
-    if (!window.confirm('Run a Places API discovery sweep with the default grid? This uses API quota.')) return;
-    setBusy(true);
-    try {
-      const res = await fetch(`${API}/runs`, {
-        method: 'POST', credentials: 'include',
-        headers: { 'Content-Type': 'application/json' }, body: '{}',
-      });
-      if (!res.ok) throw new Error((await res.json()).error || `HTTP ${res.status}`);
-      alert('Discovery started. Refresh in a minute to see new leads.');
-    } catch (err) {
-      alert(`Discovery failed: ${err.message}`);
-    } finally {
-      setBusy(false);
-    }
-  }
 
   async function closeLead(id, name) {
     const reason = window.prompt(`Close lead "${name}"? Optional reason:`, '');
@@ -75,16 +61,21 @@ export default function LeadsPipeline() {
     () => [...new Set(leads.map((l) => l.country).filter(Boolean))].sort(),
     [leads]
   );
+  const nicheOpts = useMemo(
+    () => [...new Set(leads.map((l) => l.niche_name).filter(Boolean))].sort(),
+    [leads]
+  );
 
   const filtered = useMemo(() => {
     const s = search.trim().toLowerCase();
     return leads.filter((l) => {
       if (statusFilter !== 'all' && l.status !== statusFilter) return false;
       if (countryFilter !== 'all' && l.country !== countryFilter) return false;
+      if (nicheFilter !== 'all' && (l.niche_name || '—') !== nicheFilter) return false;
       if (s && !(l.name || '').toLowerCase().includes(s) && !(l.website || '').toLowerCase().includes(s)) return false;
       return true;
     });
-  }, [leads, statusFilter, countryFilter, search]);
+  }, [leads, statusFilter, countryFilter, nicheFilter, search]);
 
   const stageCounts = summary.byStatus || {};
   const orderedStages = STAGE_ORDER.filter((s) => stageCounts[s]);
@@ -95,11 +86,17 @@ export default function LeadsPipeline() {
       eyebrow="Agency Pipeline"
       actions={
         <>
-          <button onClick={runDiscovery} disabled={busy} style={btn.primary}>Run discovery</button>
+          <button onClick={() => setShowDiscovery(true)} style={btn.primary}>Run discovery</button>
           <button onClick={load} disabled={loading} style={btn.secondary}>Refresh</button>
         </>
       }
     >
+      {showDiscovery ? (
+        <RunDiscoveryModal
+          onClose={() => setShowDiscovery(false)}
+          onStarted={(n) => alert(`Discovery started for "${n?.name || 'niche'}". Refresh in a minute.`)}
+        />
+      ) : null}
       {error ? <div style={adminStyles.errorCard}>{error}</div> : null}
 
       <div style={stageStrip}>
@@ -134,6 +131,10 @@ export default function LeadsPipeline() {
           <option value="all">All countries</option>
           {countries.map((c) => <option key={c} value={c}>{c}</option>)}
         </select>
+        <select value={nicheFilter} onChange={(e) => setNicheFilter(e.target.value)} style={select}>
+          <option value="all">All niches</option>
+          {nicheOpts.map((n) => <option key={n} value={n}>{n}</option>)}
+        </select>
         <input
           placeholder="Search name or website…"
           value={search}
@@ -150,22 +151,23 @@ export default function LeadsPipeline() {
           <table style={adminStyles.table}>
             <thead>
               <tr>
-                {['Business', 'Location', 'Category', 'Score', 'Stage', 'Value', 'Contact', 'Updated', ''].map((c) => (
+                {['Business', 'Niche', 'Location', 'Category', 'Score', 'Stage', 'Value', 'Contact', 'Updated', ''].map((c) => (
                   <th key={c} style={adminStyles.th}>{c}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td style={adminStyles.emptyCell} colSpan={9}>Loading…</td></tr>
+                <tr><td style={adminStyles.emptyCell} colSpan={10}>Loading…</td></tr>
               ) : filtered.length === 0 ? (
-                <tr><td style={adminStyles.emptyCell} colSpan={9}>No leads match.</td></tr>
+                <tr><td style={adminStyles.emptyCell} colSpan={10}>No leads match.</td></tr>
               ) : filtered.map((l) => (
                 <tr key={l.id}>
                   <td style={adminStyles.td}>
                     <Link to={`/admin/leads/${l.id}`} style={link}>{l.name || '—'}</Link>
                     {l.website ? <div style={sub}>{l.website.replace(/^https?:\/\//, '')}</div> : <div style={sub}>no website</div>}
                   </td>
+                  <td style={adminStyles.td}>{l.niche_name || '—'}</td>
                   <td style={adminStyles.td}>{[l.city, l.country].filter(Boolean).join(', ') || '—'}</td>
                   <td style={adminStyles.td}>{l.category || '—'}</td>
                   <td style={adminStyles.td}>{l.audit_score ?? '—'}</td>

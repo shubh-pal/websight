@@ -13,6 +13,7 @@ import AdminWebsites from './pages/AdminWebsites';
 import AdminContacts from './pages/AdminContacts';
 import LeadsPipeline from './pages/admin/LeadsPipeline';
 import LeadDetail from './pages/admin/LeadDetail';
+import Niches from './pages/admin/Niches';
 
 import ProtectedRoute from './components/ProtectedRoute';
 import AdminProtectedRoute from './components/AdminProtectedRoute';
@@ -72,6 +73,7 @@ export default function App() {
         <Route path="/admin/contacts" element={<AdminProtectedRoute><AdminContacts /></AdminProtectedRoute>} />
         <Route path="/admin/leads" element={<AdminProtectedRoute><LeadsPipeline /></AdminProtectedRoute>} />
         <Route path="/admin/leads/:id" element={<AdminProtectedRoute><LeadDetail /></AdminProtectedRoute>} />
+        <Route path="/admin/niches" element={<AdminProtectedRoute><Niches /></AdminProtectedRoute>} />
 
         {/* /app alias for the agency pipeline */}
         <Route path="/app" element={<AdminProtectedRoute><LeadsPipeline /></AdminProtectedRoute>} />

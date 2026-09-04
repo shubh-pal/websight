@@ -22,6 +22,7 @@ export default function AdminLayout({ title, eyebrow, actions, children }) {
             <AdminNavLink to="/admin/users">Users</AdminNavLink>
             <AdminNavLink to="/admin/websites">Generated Websites</AdminNavLink>
             <AdminNavLink to="/admin/leads">Leads Pipeline</AdminNavLink>
+            <AdminNavLink to="/admin/niches">Niches</AdminNavLink>
             <AdminNavLink to="/admin/contacts">Contacts</AdminNavLink>
           </nav>
         </div>

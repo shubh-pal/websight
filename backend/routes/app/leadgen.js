@@ -4,50 +4,92 @@
  */
 const express = require('express');
 const { runDiscovery } = require('../../services/leadgen/discover');
-const { DEFAULT_GRID } = require('../../services/leadgen/config');
 const store = require('../../services/leadgen/store');
+const niches = require('../../services/leadgen/niches');
 const gcs = require('../../services/gcsStorage');
 
 const router = express.Router();
 
-// Kick off a discovery sweep. Runs in the background; poll GET /runs for status.
+// ── Niches ────────────────────────────────────────────────────────────────
+router.get('/niches', async (req, res) => {
+  const list = await niches.listNiches({ includeInactive: req.query.all === '1' });
+  res.json(list);
+});
+
+router.get('/niches/stats', async (req, res) => {
+  res.json(await niches.stats());
+});
+
+router.post('/niches', async (req, res) => {
+  const { name, search_terms, locations, notes } = req.body || {};
+  if (!name || !Array.isArray(search_terms) || !search_terms.length) {
+    return res.status(400).json({ error: 'name and non-empty search_terms[] required' });
+  }
+  try {
+    res.status(201).json(await niches.createNiche({ name, search_terms, locations: locations || [], notes }));
+  } catch (err) {
+    res.status(err.code === '23505' ? 409 : 500).json({ error: err.message });
+  }
+});
+
+router.put('/niches/:id', async (req, res) => {
+  const n = await niches.getNiche(req.params.id);
+  if (!n) return res.status(404).json({ error: 'Niche not found' });
+  res.json(await niches.updateNiche(req.params.id, req.body || {}));
+});
+
+router.delete('/niches/:id', async (req, res) => {
+  const n = await niches.getNiche(req.params.id);
+  if (!n) return res.status(404).json({ error: 'Niche not found' });
+  await niches.updateNiche(req.params.id, { active: false });
+  res.json({ ok: true, deactivated: true });
+});
+
+// ── Discovery runs ────────────────────────────────────────────────────────
+// Body: { nicheId, overrides:{ countries?:[], cities?:[] } }  (or legacy { grid })
 router.post('/runs', async (req, res) => {
-  const grid = req.body?.grid || DEFAULT_GRID;
   if (!process.env.GOOGLE_API_KEY) {
     return res.status(503).json({ error: 'GOOGLE_API_KEY not configured' });
   }
-  if (!Array.isArray(grid.targets) || !grid.targets.length) {
-    return res.status(400).json({ error: 'grid.targets must be a non-empty array' });
+  const { nicheId, overrides, grid } = req.body || {};
+  if (!nicheId && !grid) {
+    return res.status(400).json({ error: 'nicheId (or a raw grid) is required' });
   }
 
   res.status(202).json({ started: true });
-  runDiscovery({ grid, requestedBy: req.user?.email || 'admin' })
-    .then((r) => console.log('[leadgen] discovery done:', r.runId, r.newLeads, 'new'))
+  runDiscovery({ nicheId, overrides: overrides || {}, grid, requestedBy: req.user?.email || 'admin' })
+    .then((r) => console.log('[leadgen] discovery done:', r.runId, r.niche, r.newLeads, 'new'))
     .catch((err) => console.error('[leadgen] discovery failed:', err.message));
 });
 
 router.get('/runs', async (req, res) => {
   const rows = await store.q(
-    `SELECT * FROM lead_runs ORDER BY created_at DESC LIMIT 25`
+    `SELECT r.*, n.name AS niche_name
+       FROM lead_runs r LEFT JOIN niches n ON n.id = r.niche_id
+      ORDER BY r.created_at DESC LIMIT 25`
   );
   res.json(rows);
 });
 
 router.get('/leads', async (req, res) => {
-  const { status, country } = req.query;
+  const { status, country, niche } = req.query;
   const limit = Math.min(Number(req.query.limit) || 100, 500);
   const where = [];
   const params = [];
-  if (status) { params.push(status); where.push(`status = $${params.length}`); }
-  if (country) { params.push(country); where.push(`country = $${params.length}`); }
+  if (status) { params.push(status); where.push(`l.status = $${params.length}`); }
+  if (country) { params.push(country); where.push(`l.country = $${params.length}`); }
+  if (niche === 'none') { where.push(`l.niche_id IS NULL`); }
+  else if (niche) { params.push(niche); where.push(`n.slug = $${params.length}`); }
   params.push(limit);
   const rows = await store.q(
-    `SELECT id, name, country, city, category, website, phone, contact_email,
-            rating, reviews, status, audit_score, audit_reasons,
-            qualify_decision, qualify_value_usd, error_stage, error, updated_at
-       FROM leads
+    `SELECT l.id, l.name, l.country, l.city, l.category, l.website, l.phone, l.contact_email,
+            l.rating, l.reviews, l.status, l.audit_score, l.audit_reasons,
+            l.qualify_decision, l.qualify_value_usd, l.error_stage, l.error, l.updated_at,
+            n.name AS niche_name, n.slug AS niche_slug
+       FROM leads l
+       LEFT JOIN niches n ON n.id = l.niche_id
        ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
-       ORDER BY audit_score DESC NULLS LAST, updated_at DESC
+       ORDER BY l.audit_score DESC NULLS LAST, l.updated_at DESC
        LIMIT $${params.length}`,
     params
   );

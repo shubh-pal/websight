@@ -103,3 +103,47 @@ CREATE TABLE IF NOT EXISTS suppressions (
   reason     TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- ── Niches: a named vertical + its Places search terms + default locations ──
+CREATE TABLE IF NOT EXISTS niches (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name        TEXT NOT NULL,
+  slug        TEXT UNIQUE NOT NULL,
+  search_terms JSONB NOT NULL DEFAULT '[]'::jsonb,   -- ["dentist","dental clinic"]
+  locations   JSONB NOT NULL DEFAULT '[]'::jsonb,    -- [{"country":"US","cities":["Los Angeles, CA"]}]
+  active      BOOLEAN NOT NULL DEFAULT TRUE,
+  notes       TEXT,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE leads     ADD COLUMN IF NOT EXISTS niche_id UUID REFERENCES niches(id) ON DELETE SET NULL;
+ALTER TABLE lead_runs ADD COLUMN IF NOT EXISTS niche_id UUID REFERENCES niches(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS leads_niche_idx ON leads(niche_id);
+
+-- Starter niches (idempotent).
+INSERT INTO niches (name, slug, search_terms, locations) VALUES
+  ('Dental', 'dental',
+   '["dentist","dental clinic","cosmetic dentist"]'::jsonb,
+   '[{"country":"US","cities":["Los Angeles, CA","Austin, TX","Denver, CO"]},
+     {"country":"GB","cities":["Manchester","Leeds","Bristol"]},
+     {"country":"AU","cities":["Brisbane","Perth"]}]'::jsonb),
+  ('Legal', 'legal',
+   '["personal injury law firm","solicitors","conveyancer","family law attorney"]'::jsonb,
+   '[{"country":"US","cities":["Los Angeles, CA","Austin, TX","Denver, CO"]},
+     {"country":"GB","cities":["Manchester","Leeds","Bristol"]},
+     {"country":"AU","cities":["Brisbane","Perth"]}]'::jsonb),
+  ('Home Services', 'home-services',
+   '["plumber","roofing contractor","electrician","hvac contractor"]'::jsonb,
+   '[{"country":"US","cities":["Los Angeles, CA","Austin, TX","Denver, CO"]},
+     {"country":"GB","cities":["Manchester","Leeds","Bristol"]},
+     {"country":"AU","cities":["Brisbane","Perth"]}]'::jsonb),
+  ('Med Spa & Beauty', 'med-spa-beauty',
+   '["med spa","aesthetic clinic","hair salon","barber shop"]'::jsonb,
+   '[{"country":"US","cities":["Los Angeles, CA","Austin, TX","Denver, CO"]},
+     {"country":"GB","cities":["Manchester","Leeds","Bristol"]}]'::jsonb),
+  ('Real Estate', 'real-estate',
+   '["real estate agency","letting agent","property management company"]'::jsonb,
+   '[{"country":"US","cities":["Austin, TX","Denver, CO"]},
+     {"country":"GB","cities":["Manchester","Leeds","Bristol"]}]'::jsonb)
+ON CONFLICT (slug) DO NOTHING;

@@ -8,10 +8,10 @@ async function q(text, params) {
   return rows;
 }
 
-async function createRun(grid, requestedBy) {
+async function createRun(grid, requestedBy, nicheId = null) {
   const [row] = await q(
-    `INSERT INTO lead_runs (grid, requested_by) VALUES ($1::jsonb, $2) RETURNING *`,
-    [JSON.stringify(grid), requestedBy || null]
+    `INSERT INTO lead_runs (grid, requested_by, niche_id) VALUES ($1::jsonb, $2, $3) RETURNING *`,
+    [JSON.stringify(grid), requestedBy || null, nicheId]
   );
   return row;
 }
@@ -30,12 +30,12 @@ async function finishRun(id, { places_calls, new_leads, status = 'done', error =
  * (rating/reviews/phone/website/status) on conflict but never resets `status`.
  * @returns {Promise<boolean>} true if newly inserted
  */
-async function upsertLead(runId, b) {
+async function upsertLead(runId, b, nicheId = null) {
   const rows = await q(
     `INSERT INTO leads
-       (run_id, place_id, name, country, city, category, address, phone, phone_intl,
+       (run_id, niche_id, place_id, name, country, city, category, address, phone, phone_intl,
         website, rating, reviews, business_status, maps_uri, places_refreshed_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14, NOW())
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15, NOW())
      ON CONFLICT (place_id) DO UPDATE SET
        phone = EXCLUDED.phone,
        phone_intl = EXCLUDED.phone_intl,
@@ -43,10 +43,11 @@ async function upsertLead(runId, b) {
        rating = EXCLUDED.rating,
        reviews = EXCLUDED.reviews,
        business_status = EXCLUDED.business_status,
+       niche_id = COALESCE(leads.niche_id, EXCLUDED.niche_id),
        places_refreshed_at = NOW()
      RETURNING (xmax = 0) AS inserted`,
     [
-      runId, b.place_id, b.name, b.country, b.city || null, b.category || null,
+      runId, nicheId, b.place_id, b.name, b.country, b.city || null, b.category || null,
       b.address, b.phone, b.phone_intl, b.website, b.rating, b.reviews,
       b.business_status, b.maps_uri,
     ]
