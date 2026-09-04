@@ -239,4 +239,4 @@ async function buildProposalPdf(leadId) {
   }
 }
 
-module.exports = { buildProposalPdf };
+module.exports = { buildProposalPdf, renderHtml, toDataUrl };
