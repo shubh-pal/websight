@@ -116,6 +116,19 @@ node generate-icons.js
 
 ## Usage
 
+### Public scrape export API
+
+`POST /api/public/scrape` is a no-auth endpoint for server-side automation. It accepts one public `http` or `https` URL and responds with a ZIP archive; successful responses are `application/zip`, while failures are JSON.
+
+```bash
+curl --fail --request POST http://localhost:3001/api/public/scrape \
+  --header 'Content-Type: application/json' \
+  --data '{"url":"https://example.com"}' \
+  --output example-com-scrape.zip
+```
+
+The archive includes `manifest.json`, `content/page.html`, `data/scraped-data.json`, `data/design-system.json`, and `assets/asset-manifest.json`. When browser rendering succeeds it also includes `assets/original-screenshot.webp`. The export captures the requested page only (`pageCount` and `pagesCaptured` are both `1`); asset URLs, including the detected logo, are recorded as source references and are not mirrored. Private-network, loopback, credential-bearing, and non-HTTP(S) targets are rejected. The endpoint is rate-limited to 5 requests per IP per hour by default; set `PUBLIC_SCRAPE_RATE_LIMIT_MAX` to adjust it.
+
 ### Via URL
 
 1. Open `http://localhost:5173`

@@ -5,13 +5,13 @@ const puppeteer = require('puppeteer');
  * Scrape a URL. PRIORITIZES SPEED. 
  * Fetches basic data immediately, then tries Puppeteer for 8s to get rich styles.
  */
-async function scrapeURL(url, onProgress = () => {}) {
+async function scrapeURL(url, onProgress = () => {}, { validateUrl } = {}) {
   console.log(`[scraper] Starting scrape for: ${url}`);
   onProgress('Starting fast-fetch analysis…');
 
   let data;
   try {
-    data = await scrapeWithFetch(url);
+    data = await scrapeWithFetch(url, { validateUrl });
     onProgress('Structure analyzed. Augmenting with design tokens…');
   } catch (err) {
     console.warn(`[scraper] Initial fetch failed: ${err.message}`);
@@ -20,7 +20,7 @@ async function scrapeURL(url, onProgress = () => {}) {
 
   try {
     const browserData = await Promise.race([
-      scrapeWithPuppeteer(url, onProgress),
+      scrapeWithPuppeteer(url, onProgress, { validateUrl }),
       new Promise((_, reject) => setTimeout(() => reject(new Error('Browser timed out')), 25000))
     ]);
     
@@ -43,7 +43,7 @@ async function scrapeURL(url, onProgress = () => {}) {
   return data;
 }
 
-async function scrapeWithPuppeteer(url, onProgress = () => {}) {
+async function scrapeWithPuppeteer(url, onProgress = () => {}, { validateUrl } = {}) {
   let browser;
   try {
     onProgress('Rendering page for design analysis…');
@@ -53,6 +53,18 @@ async function scrapeWithPuppeteer(url, onProgress = () => {}) {
     });
     
     const page = await browser.newPage();
+    if (validateUrl) {
+      await page.setRequestInterception(true);
+      const checkedUrls = new Map();
+      page.on('request', request => {
+        const resourceUrl = request.url();
+        if (!/^https?:/i.test(resourceUrl)) return request.continue();
+        const cacheKey = new URL(resourceUrl).host;
+        const check = checkedUrls.get(cacheKey) || validateUrl(resourceUrl);
+        checkedUrls.set(cacheKey, check);
+        check.then(() => request.continue()).catch(() => request.abort('blockedbyclient'));
+      });
+    }
     await page.setViewport({ width: 1440, height: 900 });
     await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
     await page.setExtraHTTPHeaders({ 'Accept-Language': 'en-US,en;q=0.9' });
@@ -142,6 +154,15 @@ async function scrapeWithPuppeteer(url, onProgress = () => {}) {
         .slice(0, 6)
         .map(p => p.textContent.trim().slice(0, 200));
 
+      const assets = [];
+      const seenAssets = new Set();
+      const addAsset = (kind, src, extra = {}) => {
+        const url = resolveUrl(src);
+        if (!url || seenAssets.has(url) || assets.length >= 60) return;
+        seenAssets.add(url);
+        assets.push({ kind, url, ...extra });
+      };
+
       let logoUrl = '';
       const resolveUrl = (src) => {
         if (!src) return '';
@@ -158,6 +179,12 @@ async function scrapeWithPuppeteer(url, onProgress = () => {}) {
         const el = document.querySelector(sel);
         if (el?.src) { logoUrl = resolveUrl(el.src); break; }
       }
+      document.querySelectorAll('img').forEach(img => addAsset('image', img.currentSrc || img.src, {
+        alt: img.alt || '', width: img.naturalWidth || null, height: img.naturalHeight || null,
+      }));
+      document.querySelectorAll('link[rel~="icon"]').forEach(link => addAsset('icon', link.href));
+      document.querySelectorAll('video[poster]').forEach(video => addAsset('video-poster', video.poster));
+      addAsset('open-graph-image', document.querySelector('meta[property="og:image"]')?.content);
 
       return {
         title: document.title,
@@ -170,6 +197,7 @@ async function scrapeWithPuppeteer(url, onProgress = () => {}) {
         sections,
         headings,
         keyParagraphs,
+        assets,
         cssVars,
         bodyHTML: document.body.innerHTML.slice(0, 12000),
       };
@@ -183,12 +211,13 @@ async function scrapeWithPuppeteer(url, onProgress = () => {}) {
   }
 }
 
-async function scrapeWithFetch(url) {
+async function scrapeWithFetch(url, { validateUrl, redirectCount = 0 } = {}) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 25000);
   try {
     const res = await fetch(url, {
       signal: controller.signal,
+      redirect: validateUrl ? 'manual' : 'follow',
       headers: {
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -196,8 +225,15 @@ async function scrapeWithFetch(url) {
         'Accept-Encoding': 'gzip, deflate, br',
       },
     });
+    if (validateUrl && res.status >= 300 && res.status < 400 && res.headers.get('location')) {
+      if (redirectCount >= 5) throw new Error('Too many redirects while fetching URL');
+      const redirectUrl = new URL(res.headers.get('location'), url).href;
+      await validateUrl(redirectUrl);
+      return scrapeWithFetch(redirectUrl, { validateUrl, redirectCount: redirectCount + 1 });
+    }
+    if (!res.ok) throw new Error(`Fetch failed with status ${res.status}`);
     const html = await res.text();
-    return parseSiteData(url, html);
+    return parseSiteData(res.url || url, html);
   } finally {
     clearTimeout(timeoutId);
   }
@@ -247,6 +283,18 @@ function parseSiteData(url, html) {
     headings.push({ level: el.tagName, text: $(el).text().trim().slice(0, 100) });
   });
 
+  const assets = [];
+  const seenAssets = new Set();
+  const addAsset = (kind, src, extra = {}) => {
+    const resolved = resolveLogoUrl(url, src);
+    if (!resolved || seenAssets.has(resolved) || assets.length >= 60) return;
+    seenAssets.add(resolved);
+    assets.push({ kind, url: resolved, ...extra });
+  };
+  $('img').each((_, el) => addAsset('image', $(el).attr('src'), { alt: $(el).attr('alt') || '' }));
+  $('link[rel~="icon"]').each((_, el) => addAsset('icon', $(el).attr('href')));
+  $('meta[property="og:image"]').each((_, el) => addAsset('open-graph-image', $(el).attr('content')));
+
   return {
     url,
     title: $('title').text(),
@@ -258,6 +306,7 @@ function parseSiteData(url, html) {
     sections,
     headings,
     cssVars: {},
+    assets,
     bodyHTML: $('body').html()?.slice(0, 10000) || '',
     source: 'fetch',
   };

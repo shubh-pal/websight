@@ -317,16 +317,17 @@ router.get('/keys', requireAuth, async (req, res) => {
 });
 
 // PUT /auth/keys — Save (upsert) encrypted API keys
-// Body: { anthropic?: string, gemini?: string }
+// Body: { anthropic?: string, gemini?: string, vertex?: string }
 // Only providers included in the body are updated; omit a key to leave it unchanged.
 router.put('/keys', requireAuth, async (req, res) => {
   if (!db.pool) return res.status(503).json({ error: 'Database not configured' });
-  const { anthropic, gemini } = req.body;
+  const { anthropic, gemini, vertex } = req.body;
   const userId = req.user.id;
 
   const updates = [];
   if (anthropic && anthropic.trim()) updates.push({ provider: 'anthropic', key: anthropic.trim() });
   if (gemini   && gemini.trim())    updates.push({ provider: 'gemini',     key: gemini.trim()   });
+  if (vertex   && vertex.trim())    updates.push({ provider: 'vertex',     key: vertex.trim()   });
 
   if (updates.length === 0) {
     return res.status(400).json({ error: 'No keys provided' });
@@ -357,7 +358,7 @@ router.put('/keys', requireAuth, async (req, res) => {
 router.delete('/keys/:provider', requireAuth, async (req, res) => {
   if (!db.pool) return res.status(503).json({ error: 'Database not configured' });
   const { provider } = req.params;
-  if (!['anthropic', 'gemini'].includes(provider)) {
+  if (!['anthropic', 'gemini', 'vertex'].includes(provider)) {
     return res.status(400).json({ error: 'Invalid provider' });
   }
   try {

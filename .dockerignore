@@ -1,0 +1,13 @@
+.git
+.codex
+node_modules
+**/node_modules
+storage
+frontend/dist
+backend/.env
+.env
+.env.*
+env.yaml
+*.pem
+*.key
+npm-debug.log*

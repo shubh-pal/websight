@@ -24,6 +24,16 @@ const PROVIDERS = [
     models: 'Gemini 2.5 Pro, Flash, Flash Lite',
     color: '#00d4e8',
   },
+  {
+    id: 'vertex',
+    label: 'Google Cloud Vertex AI',
+    keyLabel: 'Vertex AI Project ID',
+    placeholder: 'my-gcp-project-id',
+    hint: 'Get your Project ID from Google Cloud Console',
+    hintUrl: 'https://console.cloud.google.com/',
+    models: 'Gemini 2.5 Flash, Claude Sonnet 4.6',
+    color: '#4285F4',
+  },
 ];
 
 export default function Settings() {
@@ -34,8 +44,8 @@ export default function Settings() {
   const [savedKeys, setSavedKeys] = useState({}); // { anthropic: { configured: true, hint: '••••a3F9' }, ... }
 
   // Draft values the user is typing — only present if they're editing that provider
-  const [drafts, setDrafts] = useState({ anthropic: '', gemini: '' });
-  const [showKey, setShowKey]   = useState({ anthropic: false, gemini: false });
+  const [drafts, setDrafts] = useState({ anthropic: '', gemini: '', vertex: '' });
+  const [showKey, setShowKey]   = useState({ anthropic: false, gemini: false, vertex: false });
   const [saving, setSaving]     = useState(false);
   const [saveMsg, setSaveMsg]   = useState('');
   const [removing, setRemoving] = useState({}); // { anthropic: true/false }
@@ -58,9 +68,10 @@ export default function Settings() {
     const body = {};
     if (drafts.anthropic.trim()) body.anthropic = drafts.anthropic.trim();
     if (drafts.gemini.trim())    body.gemini    = drafts.gemini.trim();
+    if (drafts.vertex.trim())    body.vertex    = drafts.vertex.trim();
 
     if (Object.keys(body).length === 0) {
-      setSaveMsg('No changes to save — enter a key first.');
+      setSaveMsg('No changes to save — enter a key or Project ID first.');
       setSaving(false);
       return;
     }
@@ -83,6 +94,7 @@ export default function Settings() {
       setDrafts(prev => ({
         anthropic: body.anthropic ? '' : prev.anthropic,
         gemini:    body.gemini    ? '' : prev.gemini,
+        vertex:    body.vertex    ? '' : prev.vertex,
       }));
       setSaveMsg('Keys saved successfully ✓');
       setTimeout(() => setSaveMsg(''), 4000);
@@ -248,11 +260,11 @@ export default function Settings() {
             <div style={styles.saveRow}>
               <button
                 onClick={handleSave}
-                disabled={saving || (!drafts.anthropic.trim() && !drafts.gemini.trim())}
+                disabled={saving || (!drafts.anthropic.trim() && !drafts.gemini.trim() && !drafts.vertex.trim())}
                 style={{
                   ...styles.saveBtn,
-                  opacity: saving || (!drafts.anthropic.trim() && !drafts.gemini.trim()) ? 0.5 : 1,
-                  cursor:  saving || (!drafts.anthropic.trim() && !drafts.gemini.trim()) ? 'not-allowed' : 'pointer',
+                  opacity: saving || (!drafts.anthropic.trim() && !drafts.gemini.trim() && !drafts.vertex.trim()) ? 0.5 : 1,
+                  cursor:  saving || (!drafts.anthropic.trim() && !drafts.gemini.trim() && !drafts.vertex.trim()) ? 'not-allowed' : 'pointer',
                 }}
               >
                 {saving ? 'Saving…' : 'Save Keys'}

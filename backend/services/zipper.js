@@ -8,8 +8,8 @@ const s3Storage = require('./s3Storage');
  * Zips a source directory, saves locally, and uploads to S3.
  * Returns { zipPath, s3ZipKey }
  */
-async function createZip(sourceDir, zipName) {
-  const zipsDir = path.join(__dirname, '../../storage/projects/zips');
+async function createZip(sourceDir, zipName, { outputDir, uploadToS3 = true } = {}) {
+  const zipsDir = outputDir || path.join(__dirname, '../../storage/projects/zips');
   if (!fs.existsSync(zipsDir)) fs.mkdirSync(zipsDir, { recursive: true });
 
   const zipPath = path.join(zipsDir, `${zipName}-${Date.now()}.zip`);
@@ -22,7 +22,7 @@ async function createZip(sourceDir, zipName) {
     const s3PassThrough = new PassThrough();
 
     let localDone = false;
-    let s3Done = !s3Storage.isEnabled; // skip S3 wait if not enabled
+    let s3Done = !uploadToS3 || !s3Storage.isEnabled; // skip S3 wait if not enabled
     let s3Key = null;
 
     const maybeResolve = () => {
@@ -43,7 +43,7 @@ async function createZip(sourceDir, zipName) {
     archive.pipe(localStream);
 
     // Also pipe to S3 via PassThrough if enabled
-    if (s3Storage.isEnabled) {
+    if (uploadToS3 && s3Storage.isEnabled) {
       archive.pipe(s3PassThrough);
       s3Storage.uploadStream(s3ZipKey, s3PassThrough, 'application/zip')
         .then(() => {

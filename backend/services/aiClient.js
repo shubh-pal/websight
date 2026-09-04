@@ -20,6 +20,9 @@ const SUPPORTED_MODELS = {
   'llama-3.1-8b-instant':    'groq',
   // DeepSeek (cheapest, great code quality)
   'deepseek-chat':           'deepseek',
+  // Vertex AI
+  'vertex-gemini-2.5-flash': 'vertex',
+  'vertex-claude-sonnet-4-6': 'vertex',
 };
 
 function getProvider(model) {
@@ -39,6 +42,8 @@ const MODEL_MAX_TOKENS = {
   'llama-3.3-70b-versatile': 32768,
   'llama-3.1-8b-instant':    8192,
   'deepseek-chat':           8192,
+  'vertex-gemini-2.5-flash': 65536,
+  'vertex-claude-sonnet-4-6': 16000,
 };
 
 /**
@@ -57,6 +62,7 @@ function createAIClient(model = 'claude-opus-4-5', keyOverrides = {}) {
 
     async complete(system, user, maxTokens, options = {}) {
       const tokens = Math.min(maxTokens || modelMax, modelMax);
+      if (provider === 'vertex')   return callVertex(model, system, user, tokens, options, keyOverrides.vertex);
       if (provider === 'gemini')   return callGemini(model, system, user, tokens, options, keyOverrides.gemini);
       if (provider === 'openai')   return callOpenAICompat('openai',   model, system, user, tokens, options);
       if (provider === 'groq')     return callOpenAICompat('groq',     model, system, user, tokens, options);
@@ -146,6 +152,49 @@ async function callOpenAICompat(provider, model, system, user, maxTokens, option
   });
 
   return res.choices[0].message.content;
+}
+
+// ── Google Cloud Vertex AI ───────────────────────────────────────────────────
+
+async function callVertex(model, system, user, maxTokens, options = {}, userApiKey = null) {
+  // We treat userApiKey as the Project ID for Vertex AI
+  const projectId = userApiKey || process.env.GOOGLE_CLOUD_PROJECT;
+  const location = process.env.VERTEX_LOCATION || 'us-central1';
+
+  if (!projectId) {
+    throw new Error('Vertex AI Project ID not configured. Please add your Project ID in Settings.');
+  }
+
+  let actualModel = model.replace('vertex-', '');
+  
+  if (actualModel.includes('claude')) {
+    const { AnthropicVertex } = require('@anthropic-ai/vertex-sdk');
+    // Claude 4.6 models on Vertex require the 'global' region
+    const claudeRegion = actualModel === 'claude-sonnet-4-6' ? 'global' : location;
+    const client = new AnthropicVertex({ projectId, region: claudeRegion });
+    const res = await client.messages.create({
+      model: actualModel,
+      max_tokens: maxTokens,
+      system,
+      messages: [{ role: 'user', content: user }],
+    });
+    return res.content[0].text;
+  } else {
+    const { GoogleGenAI } = require('@google/genai');
+    const ai = new GoogleGenAI({ vertexai: { project: projectId, location } });
+    
+    const response = await ai.models.generateContent({
+      model: actualModel,
+      contents: user,
+      config: {
+        systemInstruction: system,
+        maxOutputTokens: maxTokens,
+        temperature: options.isJson ? 0.2 : 0.4,
+        responseMimeType: options.isJson ? 'application/json' : 'text/plain',
+      }
+    });
+    return response.text;
+  }
 }
 
 module.exports = { createAIClient, SUPPORTED_MODELS, getProvider };

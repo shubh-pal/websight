@@ -16,6 +16,8 @@ const WEB_MODELS = [
   { id: 'claude-sonnet-4-6',     provider: 'anthropic', label: 'Claude Sonnet 4',   badge: '◈ Balanced', badgeColor: '#a897ff', desc: 'High quality · Anthropic', tier: 'paid' },
   { id: 'claude-opus-4-5',       provider: 'anthropic', label: 'Claude Opus',       badge: '✦ Premium',  badgeColor: '#f5a623', desc: 'Best Claude · Anthropic',  tier: 'paid' },
   { id: 'claude-haiku-4-5',      provider: 'anthropic', label: 'Claude Haiku',      badge: '⚡ Light',   badgeColor: '#d4a0ff', desc: 'Fast & cheap · Anthropic', tier: 'paid' },
+  { id: 'vertex-gemini-2.5-flash',      provider: 'vertex',    label: 'Vertex Gemini 2.5 Flash',  badge: '☁️ Cloud', badgeColor: '#4285F4', desc: 'Enterprise fast · Google Cloud', tier: 'paid' },
+  { id: 'vertex-claude-sonnet-4-6',     provider: 'vertex',    label: 'Vertex Claude Sonnet 4.6',   badge: '☁️ Cloud', badgeColor: '#4285F4', desc: 'Enterprise high quality · Google Cloud', tier: 'paid' },
 ];
 
 const MODEL_PROVIDER = Object.fromEntries(WEB_MODELS.map(m => [m.id, m.provider]));
