@@ -36,5 +36,6 @@ module.exports = {
     audit: Number(process.env.TICK_AUDIT_LIMIT || 10),
     qualify: Number(process.env.TICK_QUALIFY_LIMIT || 10),
     approve: Number(process.env.TICK_APPROVE_LIMIT || 0),
+    pdfRecover: Number(process.env.TICK_PDF_RECOVER_LIMIT || 3),
   },
 };
