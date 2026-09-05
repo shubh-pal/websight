@@ -27,10 +27,14 @@ module.exports = {
     ],
   },
 
-  // How many leads the cron tick advances per stage per run.
+  // How many leads the cron tick advances per stage per run. `approve`
+  // defaults to 0 — the main tick (scrape/audit/qualify) leaves it off; a
+  // separate scheduled job calls /cron/tick with an explicit approve limit
+  // on its own cadence (see docs/AGENCY_INFRA.md or DEPLOYMENT.md).
   TICK_LIMITS: {
     scrape: Number(process.env.TICK_SCRAPE_LIMIT || 5),
     audit: Number(process.env.TICK_AUDIT_LIMIT || 10),
     qualify: Number(process.env.TICK_QUALIFY_LIMIT || 10),
+    approve: Number(process.env.TICK_APPROVE_LIMIT || 0),
   },
 };
