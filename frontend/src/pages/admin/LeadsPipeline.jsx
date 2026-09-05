@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import AdminLayout, { adminStyles } from '../../components/AdminLayout';
 import { STAGE_ORDER, StageBadge, fmtDate } from './pipelineShared';
 import RunDiscoveryModal from './RunDiscoveryModal';
+import AddLeadModal from './AddLeadModal';
 
 const API = '/api/app/leadgen';
 
@@ -17,6 +18,7 @@ export default function LeadsPipeline() {
   const [search, setSearch] = useState('');
   const [busy, setBusy] = useState(false);
   const [showDiscovery, setShowDiscovery] = useState(false);
+  const [showAddLead, setShowAddLead] = useState(false);
   const [selected, setSelected] = useState(new Set());
 
   const load = useCallback(async () => {
@@ -123,7 +125,8 @@ export default function LeadsPipeline() {
       eyebrow="Agency Pipeline"
       actions={
         <>
-          <button onClick={() => setShowDiscovery(true)} style={btn.primary}>Run discovery</button>
+          <button onClick={() => setShowAddLead(true)} style={btn.primary}>Add lead</button>
+          <button onClick={() => setShowDiscovery(true)} style={btn.secondary}>Run discovery</button>
           <button onClick={load} disabled={loading} style={btn.secondary}>Refresh</button>
         </>
       }
@@ -134,6 +137,7 @@ export default function LeadsPipeline() {
           onStarted={(n) => alert(`Discovery started for "${n?.name || 'niche'}". Refresh in a minute.`)}
         />
       ) : null}
+      {showAddLead ? <AddLeadModal onClose={() => setShowAddLead(false)} /> : null}
       {error ? <div style={adminStyles.errorCard}>{error}</div> : null}
 
       <div style={stageStrip}>

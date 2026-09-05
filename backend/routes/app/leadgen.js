@@ -4,6 +4,7 @@
  */
 const express = require('express');
 const { runDiscovery } = require('../../services/leadgen/discover');
+const { searchText } = require('../../services/leadgen/places');
 const store = require('../../services/leadgen/store');
 const niches = require('../../services/leadgen/niches');
 const rerun = require('../../services/leadgen/rerun');
@@ -83,6 +84,68 @@ router.get('/runs', async (req, res) => {
       ORDER BY r.created_at DESC LIMIT 25`
   );
   res.json(rows);
+});
+
+// ── Manual lead entry ─────────────────────────────────────────────────────
+// Search Google Business listings by name (does not create anything yet —
+// the admin picks a result to add).
+router.post('/leads/manual/search-places', async (req, res) => {
+  if (!process.env.GOOGLE_API_KEY) return res.status(503).json({ error: 'GOOGLE_API_KEY not configured' });
+  const query = (req.body?.query || '').trim();
+  if (!query) return res.status(400).json({ error: 'query is required' });
+  try {
+    const { results } = await searchText(process.env.GOOGLE_API_KEY, query, req.body?.country || null, 8);
+    res.json({ results });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+function slugifyHost(url) {
+  try {
+    const u = new URL(/^https?:\/\//i.test(url) ? url : `https://${url}`);
+    return u.hostname.replace(/^www\./, '');
+  } catch (_) {
+    return null;
+  }
+}
+function humanizeHost(host) {
+  const label = host.split('.')[0] || host;
+  return label.replace(/[-_]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+// Create a lead either from a picked Places search result ({ source:'place',
+// place }) or directly from a website URL ({ source:'website', website, name? }).
+// Immediately kicks off scrape+audit+qualify so it starts moving right away.
+router.post('/leads/manual', async (req, res) => {
+  const { source, place, website, name, nicheId } = req.body || {};
+  let business;
+
+  if (source === 'place') {
+    if (!place?.place_id) return res.status(400).json({ error: 'place.place_id is required' });
+    business = place;
+  } else if (source === 'website') {
+    const host = slugifyHost(website || '');
+    if (!host) return res.status(400).json({ error: 'a valid website URL is required' });
+    const url = /^https?:\/\//i.test(website) ? website : `https://${website}`;
+    business = {
+      place_id: `manual:${host}`,
+      name: (name || '').trim() || humanizeHost(host),
+      website: url,
+      country: null, city: null, category: null, address: null,
+      phone: null, phone_intl: null, rating: null, reviews: null,
+      business_status: null, maps_uri: null,
+    };
+  } else {
+    return res.status(400).json({ error: "source must be 'place' or 'website'" });
+  }
+
+  const { id, created } = await store.createManualLead(business, nicheId || null);
+  if (created) {
+    await store.recordEvent(id, null, 'discovered', { manualAdd: true, source, by: req.user?.email || 'admin' });
+    rerun.enqueueAudit([id]).catch((e) => console.error('[leadgen] manual-add audit enqueue failed:', e.message));
+  }
+  res.status(created ? 201 : 200).json({ id, created });
 });
 
 router.get('/leads', async (req, res) => {
