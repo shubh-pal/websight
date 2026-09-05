@@ -17,6 +17,7 @@ export default function LeadDetail() {
   const [noteText, setNoteText] = useState('');
   const [lightbox, setLightbox] = useState(null); // { src, label }
   const [showPdf, setShowPdf] = useState(false);
+  const [rebuildState, setRebuildState] = useState('idle'); // 'idle' | 'rebuilding' | 'rebuilt' | 'failed'
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -53,6 +54,14 @@ export default function LeadDetail() {
     }
   }
   const action = (p, body, msg) => call('POST', `/${p}`, body, msg);
+
+  async function rebuildProposal(confirmMsg) {
+    if (confirmMsg && !window.confirm(confirmMsg)) return;
+    setRebuildState('rebuilding');
+    const ok = await call('POST', '/rebuild-proposal', null);
+    setRebuildState(ok ? 'rebuilt' : 'failed');
+    setTimeout(() => setRebuildState((s) => (s === 'rebuilding' ? s : 'idle')), 4000);
+  }
 
   function startEdit() {
     const l = data.lead;
@@ -247,17 +256,21 @@ export default function LeadDetail() {
               <button onClick={() => setShowPdf(true)} style={btn.primary}>Preview</button>
               <a href={media.proposalPdf} target="_blank" rel="noreferrer" style={btn.secondary}>Open in new tab</a>
               <button
-                onClick={() => action('rebuild-proposal', null, 'Rebuild the proposal PDF from the current mockup, lead data, and agency settings?')}
-                disabled={busy} style={btn.secondary}
+                onClick={() => rebuildProposal('Rebuild the proposal PDF from the current mockup, lead data, and agency settings?')}
+                disabled={busy || rebuildState === 'rebuilding'} style={btn.secondary}
               >
                 Rebuild
               </button>
+              <RebuildStatus state={rebuildState} />
               <span style={sub}>reflects the current mockup + agency settings</span>
             </div>
           ) : lead.mockup_gcs_key ? (
             <>
               <p style={{ fontSize: 13.5, marginBottom: 12 }}>A redesign mockup is ready — build the pitch deck whenever you want.</p>
-              <button onClick={() => action('rebuild-proposal')} disabled={busy} style={btn.primary}>Build proposal</button>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                <button onClick={() => rebuildProposal()} disabled={busy || rebuildState === 'rebuilding'} style={btn.primary}>Build proposal</button>
+                <RebuildStatus state={rebuildState} />
+              </div>
             </>
           ) : (
             <div style={assetEmpty}>Upload a redesign mockup above first — the proposal builds automatically once one exists.</div>
@@ -331,6 +344,12 @@ function Row({ k, v }) {
       <span style={{ color: '#e2e8f0' }}>{v || '—'}</span>
     </div>
   );
+}
+function RebuildStatus({ state }) {
+  if (state === 'rebuilding') return <span style={{ fontSize: 12.5, color: '#7dd3fc' }}>Rebuilding…</span>;
+  if (state === 'rebuilt') return <span style={{ fontSize: 12.5, color: '#22c55e' }}>Rebuilt ✓</span>;
+  if (state === 'failed') return <span style={{ fontSize: 12.5, color: '#fca5a5' }}>Rebuild failed</span>;
+  return null;
 }
 function Pill({ ok, label }) {
   const c = ok ? '#22c55e' : '#ef4444';
