@@ -16,8 +16,19 @@
   .slide {
     position: relative; width: 1280px; height: 720px; overflow: hidden; isolation: isolate;
     background: var(--cream); box-shadow: var(--shadow); flex-shrink: 0; color: var(--ink);
+    page-break-after: always;
   }
+  .slide:last-child { page-break-after: auto; }
   .slide.warm { background: radial-gradient(circle at 4% 0%, rgba(189,138,61,.2), transparent 25%), linear-gradient(135deg,#f9f5ee,#e9dfd0); }
+
+  /* Print/PDF export: one slide per page, no toolbar/gaps/shadow bleeding
+     across page boundaries. */
+  @media print {
+    body { background: #fff; }
+    .toolbar { display: none; }
+    .stage { padding: 0; gap: 0; }
+    .slide { box-shadow: none; }
+  }
   .slide::before { content:""; position:absolute; z-index:-1; inset:0; opacity:.8;
     background-image: linear-gradient(90deg, rgba(20,34,53,.035) 1px, transparent 1px), linear-gradient(rgba(20,34,53,.035) 1px, transparent 1px);
     background-size: 42px 42px; mask-image: linear-gradient(115deg, black, transparent 65%); }
