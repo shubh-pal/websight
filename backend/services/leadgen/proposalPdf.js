@@ -1,10 +1,9 @@
 /**
- * Builds the pitch PDF as a 16:9 slide deck (960x540pt, PowerPoint widescreen)
- * once a redesign mockup exists. Puppeteer only — no external API calls, no
- * per-PDF cost.
+ * Builds the pitch PDF (16:9 slide deck, 1280x720 per page) once a redesign
+ * mockup exists. Puppeteer only — no external API calls, no per-PDF cost.
  *
- * Ported from the approved "v3 — Creative" draft
- * (backend/templates/pitch/v3-creative.html). Keep that file and this
+ * Ported from the approved "v4 — MacBook mockup" draft
+ * (backend/templates/pitch/v4-macbook.html). Keep that file and this
  * renderer in sync if the design changes again.
  */
 const puppeteer = require('puppeteer');
@@ -29,174 +28,240 @@ async function toDataUrl(key) {
   }
 }
 
-function mediaImg(url) {
-  return url
-    ? `<img src="${url}" />`
-    : `<div class="placeholder" style="width:100%;height:100%"><span>no image yet</span></div>`;
-}
-
-/** A screenshot/mockup shown inside a browser-window frame — reads as an
- * intentional device mockup rather than a raw, arbitrarily-cropped image. */
-function browserFrame(url, tagLabel, tagSub) {
-  return `<div class="frame-wrap">
-    ${tagLabel ? `<div class="frame-tag"><span class="n serif">${esc(tagLabel)}</span><span class="mono">${esc(tagSub || '')}</span></div>` : ''}
-    <div class="browser-frame">
-      <div class="chrome">
-        <div class="dot" style="background:#ef4444"></div><div class="dot" style="background:#eab308"></div><div class="dot" style="background:#22c55e"></div>
-        <div class="url-bar"></div>
-      </div>
-      <div class="content">${mediaImg(url)}</div>
-    </div>
+/** A screenshot shown inside a MacBook mockup frame. */
+function macbook(url, { flat = false, rotateClass = '' } = {}) {
+  const inner = url ? `<img src="${esc(url)}" alt="">` : `<div class="ph">no image yet</div>`;
+  return `<div class="macbook${flat ? ' flat' : ''}${rotateClass ? ' ' + rotateClass : ''}">
+    <div class="screen"><div class="camera"></div>${inner}</div>
+    <div class="base"></div>
   </div>`;
 }
+
+const CSS = `
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&display=swap');
+  :root { --ink:#142235; --navy:#10233b; --gold:#bd8a3d; --cream:#fffdf8; --muted:#68717d; --line:rgba(20,34,53,.15); --shadow:0 28px 70px rgba(22,31,45,.15); }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: #fff; }
+  body { font-family: 'Inter', sans-serif; }
+  .slide {
+    position: relative; width: 1280px; height: 720px; overflow: hidden; isolation: isolate;
+    background: var(--cream); color: var(--ink); page-break-after: always;
+  }
+  .slide:last-child { page-break-after: auto; }
+  .slide.warm { background: radial-gradient(circle at 4% 0%, rgba(189,138,61,.2), transparent 25%), linear-gradient(135deg,#f9f5ee,#e9dfd0); }
+  .slide::before { content:""; position:absolute; z-index:-1; inset:0; opacity:.8;
+    background-image: linear-gradient(90deg, rgba(20,34,53,.035) 1px, transparent 1px), linear-gradient(rgba(20,34,53,.035) 1px, transparent 1px);
+    background-size: 42px 42px; mask-image: linear-gradient(115deg, black, transparent 65%); }
+  .frame { height: 100%; padding: 48px 58px 42px; display: flex; flex-direction: column; }
+  .topline, .footer { display: flex; align-items: center; justify-content: space-between; }
+  .brand { display: flex; align-items: center; gap: 12px; color: var(--navy); font-size: 12px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; }
+  .brand::before { content:""; width: 32px; height: 2px; background: var(--gold); }
+  .index, .eyebrow { color: var(--gold); font-family: 'Inter', sans-serif; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; }
+  .index { color: rgba(20,34,53,.52); }
+  h1, h2, h3, p { margin: 0; }
+  h1, h2 { font-family: Fraunces, Georgia, serif; font-weight: 600; letter-spacing: -.055em; color: var(--navy); }
+  h1 { max-width: 610px; font-size: 60px; line-height: .99; }
+  h2 { max-width: 705px; font-size: 48px; line-height: 1.02; }
+  h3 { font-size: 15px; line-height: 1.3; }
+  p { color: var(--muted); font-size: 16px; line-height: 1.58; }
+  .lede { max-width: 580px; font-size: 18px; line-height: 1.55; }
+
+  .hero { display: grid; grid-template-columns: 1fr 1.02fr; flex: 1; align-items: center; gap: 36px; }
+  .hero-copy { padding: 30px 0 0 30px; }
+  .hero-copy .eyebrow { margin-bottom: 18px; }
+  .hero-copy .lede { margin-top: 24px; }
+  .rule { width: 46px; height: 2px; margin: 26px 0 15px; background: var(--gold); }
+
+  .mockup-wrap { position: relative; display: flex; align-items: center; justify-content: center; min-height: 440px; }
+  .halo { position: absolute; width: 440px; height: 440px; border-radius: 50%; background: radial-gradient(circle, rgba(189,138,61,.19), rgba(189,138,61,0) 68%); }
+  .macbook { position: relative; z-index: 1; width: 600px; max-width: 100%; transform: rotate(-2deg); filter: drop-shadow(0 27px 20px rgba(13,28,47,.22)); }
+  .macbook .screen { position: relative; overflow: hidden; aspect-ratio: 16/10; padding: 11px; border: 5px solid #142235; border-radius: 17px 17px 7px 7px; background: #142235; }
+  .macbook .camera { position: absolute; z-index: 2; top: 4px; left: 50%; width: 38px; height: 4px; border-radius: 10px; transform: translateX(-50%); background: #2e4056; }
+  .macbook img, .macbook .ph { display: block; width: 100%; height: 100%; object-fit: cover; object-position: top; border-radius: 5px; background: #fff; }
+  .macbook .ph { display: flex; align-items: center; justify-content: center; background: #eef1f5; color: #94a3b8; font-family: 'Inter'; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+  .macbook .base { position: relative; width: 112%; height: 18px; margin-left: -6%; border-radius: 2px 2px 12px 12px; background: linear-gradient(#d9dce1,#9ea5ad); }
+  .macbook .base::after { content:""; position: absolute; top: 0; left: 40%; width: 20%; height: 5px; border-radius: 0 0 5px 5px; background: #858d97; }
+  .macbook.flat { width: 490px; transform: none; }
+  .macbook.flat .screen { border-width: 4px; border-radius: 13px 13px 5px 5px; padding: 8px; }
+  .hero-caption { position: absolute; right: 0; bottom: 6px; z-index: 2; max-width: 225px; padding: 15px 18px; border-left: 2px solid var(--gold); background: rgba(255,253,248,.91); box-shadow: 0 8px 24px rgba(20,34,53,.08); }
+  .hero-caption strong { display: block; margin-bottom: 3px; font-size: 13px; }
+  .hero-caption p { font-size: 12px; }
+
+  .statement { display: grid; grid-template-columns: .82fr 1.18fr; flex: 1; align-items: center; gap: 54px; padding: 28px 38px 0; }
+  .statement .lede { margin-top: 19px; }
+  .comparison-mockups { position: relative; height: 480px; }
+  .comparison-mockups .current { position: absolute; top: 14px; right: 18px; width: 440px; transform: rotate(2.2deg); }
+  .comparison-mockups .proposed { position: absolute; top: 170px; left: 0; width: 415px; transform: rotate(-2.3deg); }
+  .tag { position: absolute; z-index: 4; padding: 7px 9px; color: var(--cream); background: var(--navy); font-family: 'Inter', sans-serif; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
+  .comparison-mockups .tag.current-tag { top: 0; right: 24px; }
+  .comparison-mockups .tag.proposed-tag { top: 154px; left: 7px; background: var(--gold); }
+
+  .design { display: grid; grid-template-columns: .9fr 1.1fr; flex: 1; align-items: center; gap: 44px; padding: 16px 42px 0; }
+  .design-copy p { max-width: 455px; margin-top: 22px; }
+  .design-list { margin: 26px 0 0; padding: 0; list-style: none; border-top: 1px solid var(--line); }
+  .design-list li { display: grid; grid-template-columns: 42px 1fr; gap: 12px; padding: 15px 0; border-bottom: 1px solid var(--line); color: var(--navy); font-size: 15px; font-weight: 600; }
+  .design-list span { color: var(--gold); font-family: 'Inter', sans-serif; font-size: 11px; padding-top: 3px; }
+  .visual { position: relative; min-height: 460px; display: flex; align-items: center; justify-content: center; }
+  .visual .macbook { width: 550px; }
+  .visual .callout { position: absolute; z-index: 3; padding: 14px 17px; max-width: 190px; background: rgba(255,253,248,.97); border: 1px solid var(--line); box-shadow: 0 13px 25px rgba(20,34,53,.11); }
+  .visual .callout strong { display: block; margin-bottom: 3px; font-size: 12px; }
+  .visual .callout p { font-size: 11px; line-height: 1.45; }
+  .callout.a { top: 30px; right: -5px; border-left: 2px solid var(--gold); }
+  .callout.b { bottom: 40px; left: 0; border-left: 2px solid var(--navy); }
+
+  .offer { display: grid; grid-template-columns: 1fr .9fr; flex: 1; align-items: center; gap: 50px; padding: 34px 54px 0; }
+  .price-line { display: flex; align-items: baseline; gap: 16px; margin: 22px 0 14px; }
+  .price { color: var(--navy); font-family: Fraunces, Georgia, serif; font-size: 88px; font-weight: 600; letter-spacing: -.08em; line-height: .8; }
+  .per { color: var(--muted); font-size: 14px; }
+  .offer-copy .lede { margin-top: 18px; }
+  .deliverables { padding: 34px 38px; background: var(--navy); color: var(--cream); }
+  .deliverables .eyebrow { color: #deb878; }
+  .deliverables h3 { margin-top: 14px; color: var(--cream); font-family: Fraunces, Georgia, serif; font-size: 28px; letter-spacing: -.04em; }
+  .deliverables ul { margin: 24px 0 0; padding: 0; list-style: none; border-top: 1px solid rgba(255,255,255,.18); }
+  .deliverables li { position: relative; padding: 14px 0 14px 24px; border-bottom: 1px solid rgba(255,255,255,.18); color: rgba(255,255,255,.82); font-size: 14px; line-height: 1.4; }
+  .deliverables li::before { content:""; position: absolute; top: 21px; left: 0; width: 9px; height: 9px; border: 1px solid #deb878; border-radius: 50%; }
+
+  .close { display: grid; grid-template-columns: 1.1fr .9fr; flex: 1; align-items: center; gap: 44px; padding: 28px 36px 0; }
+  .close h2 { max-width: 650px; font-size: 40px; }
+  .close .lede { margin-top: 18px; }
+  .next { display: flex; gap: 26px; margin-top: 30px; }
+  .next div { max-width: 175px; padding-top: 12px; border-top: 2px solid var(--gold); }
+  .next strong { display: block; margin-bottom: 4px; color: var(--navy); font-size: 13px; }
+  .next p { font-size: 12px; }
+  .contact-card { padding: 34px 36px; color: var(--cream); background: linear-gradient(135deg,#10233b,#1e3654); box-shadow: 20px 22px 0 rgba(189,138,61,.18); }
+  .contact-card h3 { margin: 14px 0 24px; color: var(--cream); font-family: Fraunces, Georgia, serif; font-size: 30px; letter-spacing: -.04em; }
+  .contact-card dl { margin: 0; }
+  .contact-card div { padding: 13px 0; border-top: 1px solid rgba(255,255,255,.2); }
+  .contact-card dt { margin-bottom: 5px; color: #deb878; font-family: 'Inter', sans-serif; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; }
+  .contact-card dd { margin: 0; color: rgba(255,255,255,.9); font-size: 15px; }
+
+  .footer { margin-top: auto; padding-top: 20px; border-top: 1px solid var(--line); }
+  .footer p { font-size: 11px; }
+
+  .placeholder, .ph { background: #eef1f5; color: #94a3b8; }
+`;
 
 function renderHtml({ lead, company, designSystem, mockup, before }) {
   const colors = designSystem?.colors || {};
   const fonts = designSystem?.fonts || {};
   const verdict = lead.qualify_raw && !lead.qualify_raw.error ? lead.qualify_raw : null;
-  const headline = verdict?.pitch_angle || `${lead.name}, it's time to stand out online.`;
+  const positioning = verdict?.summary || lead.audit_reasons || `${lead.name}'s current site is holding the business back online.`;
   const location = [lead.city, lead.country].filter(Boolean).join(', ');
-  const accent = colors.accent || colors.primary || '#b45309';
-  const headingFont = fonts.heading || 'serif';
-  const bodyFont = fonts.body || 'sans-serif';
-  const pricePerPage = company.price_per_page ?? company.price_min ?? 200;
+  const name = esc(lead.name);
+  const agencyName = esc(company.name || 'Your Agency');
+  const price = `$${company.price_per_page ?? company.price_min ?? 200}`;
+  const paletteLine = Object.values(colors).filter(Boolean).slice(0, 3).join(' / ') || 'Pulled straight from the current site';
 
-  return `<!doctype html><html><head><meta charset="utf-8"><style>
-    @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap');
-    * { box-sizing: border-box; }
-    html, body { margin: 0; padding: 0; }
-    body { font-family: 'Inter', sans-serif; }
-    .slide {
-      width: 1280px; height: 720px; position: relative; overflow: hidden;
-      background: #faf9f6; color: #1c1917; page-break-after: always;
-    }
-    .slide:last-child { page-break-after: auto; }
-    .pad { padding: 60px 72px; height: 100%; box-sizing: border-box; position: relative; z-index: 2; }
-    .serif { font-family: 'Fraunces', serif; margin: 0; letter-spacing: -0.01em; }
-    .kicker { text-transform: uppercase; letter-spacing: 0.18em; font-size: 11.5px; font-weight: 600; color: #78716c; }
-    p { line-height: 1.65; font-size: 16px; color: #57534e; margin: 0; }
-    .rule { height: 1px; background: #d6d3cd; border: none; }
-    .num-watermark { position: absolute; font-family: 'Fraunces', serif; font-weight: 600; font-size: 280px; color: rgba(0,0,0,0.045); line-height: 1; z-index: 0; user-select: none; }
-    .page-num { position: absolute; bottom: 28px; right: 32px; font-size: 12px; color: #a8a29e; z-index: 3; }
-    .page-num.on-dark { color: rgba(255,255,255,0.5); }
+  return `<!doctype html><html><head><meta charset="utf-8"><style>${CSS}</style></head><body>
 
-    /* Cover/close: image shown at full clarity in its own panel — never behind
-       text or a dark wash, so the actual design is always visible. */
-    .split-slide { display: flex; height: 100%; }
-    .split-text { flex: 0 0 44%; padding: 56px 52px; display: flex; flex-direction: column; justify-content: flex-end; color: #fff; position: relative; }
-    .split-text h1 { font-size: 42px; line-height: 1.1; color: #fff; }
-    .split-image { flex: 1; position: relative; background: #ded9cc; overflow: hidden; }
-    .wordmark { position: absolute; top: 40px; left: 52px; z-index: 3; font-family: 'Fraunces', serif; font-weight: 600; font-size: 17px; color: #fff; }
-
-    /* Browser-window mockup frame — screenshots read as an intentional
-       device mockup instead of a raw, arbitrarily-cropped image. */
-    .frame-wrap { height: 100%; box-sizing: border-box; padding: 40px; display: flex; align-items: center; justify-content: center; position: relative; }
-    .browser-frame { width: 100%; height: 100%; border-radius: 16px; overflow: hidden; background: #fff; box-shadow: 0 30px 70px rgba(0,0,0,0.32); display: flex; flex-direction: column; }
-    .browser-frame .chrome { background: #1c1917; padding: 11px 16px; display: flex; align-items: center; gap: 7px; flex-shrink: 0; }
-    .browser-frame .dot { width: 9px; height: 9px; border-radius: 50%; }
-    .browser-frame .url-bar { flex: 1; height: 17px; background: rgba(255,255,255,0.14); border-radius: 999px; margin-left: 8px; }
-    .browser-frame .content { flex: 1; position: relative; overflow: hidden; background: #f1f0ec; }
-    .browser-frame .content img { width: 100%; height: 100%; object-fit: cover; object-position: top; display: block; }
-    .frame-tag { position: absolute; top: 22px; left: 22px; z-index: 4; background: rgba(20,17,15,0.88); padding: 7px 15px; border-radius: 999px; display: flex; align-items: baseline; gap: 7px; }
-    .frame-tag .n { font-family: 'Fraunces', serif; font-size: 14px; color: #fff; }
-    .frame-tag .mono { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; font-family: 'Inter'; color: rgba(255,255,255,0.65); }
-
-    .filmstrip { display: flex; height: 100%; align-items: stretch; background: #ded9cc; }
-    .filmstrip .panel { flex: 1; position: relative; }
-    .filmstrip .divider-arrow { width: 56px; background: #1c1917; display: flex; align-items: center; justify-content: center; color: #faf9f6; font-size: 20px; z-index: 3; flex-shrink: 0; }
-
-    .palette-strip { display: flex; height: 90px; border-radius: 4px; overflow: hidden; margin-top: 26px; }
-    .palette-strip div { flex: 1; }
-    .glyph-row { display: flex; gap: 56px; margin-top: 30px; align-items: baseline; }
-    .glyph-row .Aa { font-size: 110px; line-height: 1; }
-    .glyph-row .meta { font-size: 12px; color: #78716c; margin-top: 8px; text-transform: uppercase; letter-spacing: 0.08em; }
-
-    .placeholder { background: #e7e5e0; display: flex; align-items: center; justify-content: center; }
-    .placeholder span { font-family: 'Inter'; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: #a8a29e; }
-
-    .price-fine { font-family: 'Fraunces', serif; font-size: 40px; }
-  </style></head><body>
-
-  <!-- 1/5 Cover — text panel + full-clarity image panel, never overlapping -->
-  <div class="slide">
-    <div class="split-slide">
-      <div class="split-text" style="background:linear-gradient(165deg, ${accent}, #1c1917)">
-        <div class="wordmark">${esc(company.name || 'Your Agency')}</div>
-        <div class="kicker" style="color:rgba(255,255,255,0.7)">Redesign proposal &middot; ${esc(lead.name)}${location ? ` &middot; ${esc(location)}` : ''}</div>
-        <h1 class="serif">${esc(headline)}</h1>
-        <p style="color:rgba(255,255,255,0.65);margin-top:16px">${esc(lead.category || '')}${lead.category ? ' &mdash; ' : ''}prepared exclusively for ${esc(lead.name)}.</p>
+  <!-- 1/5 Hero -->
+  <section class="slide warm"><div class="frame">
+    <div class="topline"><div class="brand">${agencyName}</div><div class="index">01 / 05</div></div>
+    <div class="hero">
+      <div class="hero-copy">
+        <div class="eyebrow">Website redesign proposal</div>
+        <h1>${name}, it's time to stand out online.</h1>
+        <p class="lede">A focused redesign for high-intent visitors who need confidence, proof, and a clear reason to contact ${name} now.</p>
+        <div class="rule"></div>
       </div>
-      <div class="split-image">${browserFrame(mockup)}</div>
-    </div>
-    <div class="page-num on-dark">01 / 05</div>
-  </div>
-
-  <!-- 2/5 Before/After filmstrip — both shown in a browser mockup, side by side -->
-  <div class="slide">
-    <div class="filmstrip">
-      <div class="panel">${browserFrame(before, 'Before', 'current site')}</div>
-      <div class="divider-arrow">&rarr;</div>
-      <div class="panel">${browserFrame(mockup, 'After', 'the redesign')}</div>
-    </div>
-    <div class="page-num">02 / 05</div>
-  </div>
-
-  <!-- 3/5 The craft -->
-  <div class="slide">
-    <div class="num-watermark" style="top:-40px;left:40px">03</div>
-    <div class="pad">
-      <div class="kicker">The craft</div>
-      <h2 class="serif" style="font-size:36px;margin:14px 0 4px">A system, not a template</h2>
-      <p style="max-width:600px">Every color and typeface below is pulled from ${esc(lead.name)}'s own brand signals &mdash; the redesign extends what already exists.</p>
-      ${Object.keys(colors).length ? `<div class="palette-strip">${Object.values(colors).filter(Boolean).map((v) => `<div style="background:${esc(v)}"></div>`).join('')}</div>` : ''}
-      <div class="glyph-row">
-        <div><div class="Aa" style="font-family:'${esc(headingFont)}',serif">Aa</div><div class="meta">${esc(headingFont)} &middot; Heading</div></div>
-        <div><div class="Aa" style="font-family:'${esc(bodyFont)}',sans-serif;font-weight:400">Aa</div><div class="meta">${esc(bodyFont)} &middot; Body</div></div>
+      <div class="mockup-wrap">
+        <div class="halo"></div>
+        ${macbook(mockup)}
+        <div class="hero-caption"><strong>The work stays visible</strong><p>The proposed homepage is the hero, not an afterthought.</p></div>
       </div>
     </div>
-    <div class="page-num">03 / 05</div>
-  </div>
+    <div class="footer"><p>${name}</p><p>${esc(location)}</p></div>
+  </div></section>
 
-  <!-- 4/5 The investment -->
-  <div class="slide">
-    <div class="num-watermark" style="top:-40px;right:40px">04</div>
-    <div class="pad">
-      <div class="kicker">The investment</div>
-      <h2 class="serif" style="font-size:38px;margin:14px 0 26px;max-width:700px">Stand out against your competitors at the cost of just a dinner.</h2>
-      <div style="display:flex;align-items:baseline;gap:14px">
-        <span class="price-fine" style="font-size:92px">$${pricePerPage}</span>
-        <span style="color:#78716c;font-size:16px">per page &middot; fixed price, no surprises</span>
+  <!-- 2/5 Comparison -->
+  <section class="slide"><div class="frame">
+    <div class="topline"><div class="eyebrow">The conversion gap</div><div class="index">02 / 05</div></div>
+    <div class="statement">
+      <div>
+        <h2>When the site feels dated, the right lead keeps searching.</h2>
+        <p class="lede">${esc(positioning)}</p>
       </div>
-      <hr class="rule" style="max-width:780px;margin:34px 0 30px">
-      <div style="display:flex;gap:56px;max-width:840px">
-        <div style="flex:1.2">
-          <div class="kicker" style="color:${accent}">Why is it so affordable?</div>
-          <p style="margin-top:10px;font-size:15.5px">Not because the quality is lower. Because the power of AI lets us spend less time on repetitive production &mdash; and more time on the decisions that make your business feel distinct.</p>
-        </div>
-        <div style="width:1px;background:#d6d3cd"></div>
-        <div style="flex:1;display:flex;flex-direction:column;gap:18px">
-          <div><div class="kicker" style="font-size:11px">The human part</div><p style="margin-top:4px;font-size:14.5px">Your story, offer, voice and local insight.</p></div>
-          <div><div class="kicker" style="font-size:11px">The AI-assisted part</div><p style="margin-top:4px;font-size:14.5px">Faster research, layouts, iteration and delivery.</p></div>
+      <div class="comparison-mockups">
+        <span class="tag current-tag">Current experience</span>
+        ${macbook(before, { flat: true, rotateClass: 'current' })}
+        <span class="tag proposed-tag">Proposed direction</span>
+        ${macbook(mockup, { flat: true, rotateClass: 'proposed' })}
+      </div>
+    </div>
+    <div class="footer"><p>${name}</p><p>The contrast makes the investment tangible</p></div>
+  </div></section>
+
+  <!-- 3/5 Design direction -->
+  <section class="slide"><div class="frame">
+    <div class="topline"><div class="eyebrow">Design direction</div><div class="index">03 / 05</div></div>
+    <div class="design">
+      <div class="design-copy">
+        <h2>Premium restraint, with the website front and center.</h2>
+        <p>Every color and typeface below is pulled from ${name}'s own brand signals &mdash; the redesign extends what already exists rather than replacing it.</p>
+        <ul class="design-list">
+          <li><span>01</span><div>Authority arrives in the first screen, before the visitor reads every detail.</div></li>
+          <li><span>02</span><div>The call-to-action gets clear visual priority without competing with the message.</div></li>
+          <li><span>03</span><div>Trust markers support the decision in the moments where hesitation usually appears.</div></li>
+        </ul>
+      </div>
+      <div class="visual">
+        <div class="halo"></div>
+        ${macbook(mockup)}
+        <div class="callout a"><strong>On-brand palette</strong><p>${esc(paletteLine)}</p></div>
+        <div class="callout b"><strong>Considered typography</strong><p>${esc(fonts.heading || 'Heading')} / ${esc(fonts.body || 'Body')} &mdash; kept intact from the existing brand.</p></div>
+      </div>
+    </div>
+    <div class="footer"><p>${name}</p><p>A design system with a conversion job</p></div>
+  </div></section>
+
+  <!-- 4/5 Investment -->
+  <section class="slide"><div class="frame">
+    <div class="topline"><div class="eyebrow">Investment</div><div class="index">04 / 05</div></div>
+    <div class="offer">
+      <div class="offer-copy">
+        <h2>Stand out against your competitors at the cost of just a dinner.</h2>
+        <div class="price-line"><div class="price">${price}</div><div class="per">per page, fixed project pricing</div></div>
+        <p class="lede">Not because the quality is lower &mdash; because the power of AI lets us spend less time on repetitive production, and more time on the decisions that make ${name} feel distinct.</p>
+      </div>
+      <div class="deliverables">
+        <div class="eyebrow">Included in each page</div>
+        <h3>Design that looks deliberate and sells the next step.</h3>
+        <ul>
+          <li>A tailored page design built around your strongest proof.</li>
+          <li>A clear conversion path from first impression to contact.</li>
+          <li>A visual system that stays consistent as pages are added.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer"><p>${name}</p><p>Scope can scale with priority pages</p></div>
+  </div></section>
+
+  <!-- 5/5 Close -->
+  <section class="slide warm"><div class="frame">
+    <div class="topline"><div class="brand">${agencyName}</div><div class="index">05 / 05</div></div>
+    <div class="close">
+      <div>
+        <div class="eyebrow">Next step</div>
+        <h2>Let's give ${name} a site worthy of the work you already do.</h2>
+        <p class="lede">Approve the direction, and we turn this into a production-ready page &mdash; final content, hierarchy, and a contact path tuned to how your leads actually arrive.</p>
+        <div class="next">
+          <div><strong>Confirm direction</strong><p>Approve the visual and messaging approach.</p></div>
+          <div><strong>Set page priority</strong><p>Choose the pages that go live first.</p></div>
+          <div><strong>Build the first page</strong><p>Apply final content and begin delivery.</p></div>
         </div>
       </div>
-    </div>
-    <div class="page-num">04 / 05</div>
-  </div>
-
-  <!-- 5/5 Close — mirrors the cover: full-clarity image, text never over it -->
-  <div class="slide">
-    <div class="split-slide">
-      <div class="split-image">${browserFrame(mockup)}</div>
-      <div class="split-text" style="background:linear-gradient(195deg, ${accent}, #1c1917); align-items:flex-start">
-        <div class="kicker" style="color:rgba(255,255,255,0.6)">Ready when you are</div>
-        <h1 class="serif" style="font-size:36px">Let's give ${esc(lead.name)} a site worthy of the work you already do.</h1>
-        <div style="margin-top:26px;font-size:14px;color:rgba(255,255,255,0.8);display:flex;flex-direction:column;gap:6px">
-          <span>${esc(company.name)}</span><span>${esc(company.contact_email)}</span><span>${esc(company.contact_phone)}</span><span>${esc(company.website)}</span>
-        </div>
+      <div class="contact-card">
+        <div class="eyebrow">Start the project</div>
+        <h3>${agencyName}</h3>
+        <dl>
+          <div><dt>Email</dt><dd>${esc(company.contact_email)}</dd></div>
+          <div><dt>Phone</dt><dd>${esc(company.contact_phone)}</dd></div>
+          <div><dt>Website</dt><dd>${esc(company.website)}</dd></div>
+        </dl>
       </div>
     </div>
-    <div class="page-num on-dark">05 / 05</div>
-  </div>
+    <div class="footer"><p>${name}</p><p>Prepared exclusively for this proposal</p></div>
+  </div></section>
 
   </body></html>`;
 }
@@ -227,6 +292,10 @@ async function buildProposalPdf(leadId) {
     const page = await browser.newPage();
     await page.setViewport({ width: 1280, height: 720 });
     await page.setContent(html, { waitUntil: 'networkidle0', timeout: 30000 });
+    // The @media-print-independent page-break-after rules above are always
+    // active (no @media print gate in the production CSS), but emulating
+    // print media is still the correct signal for Chrome's print pipeline.
+    await page.emulateMediaType('print');
     const pdfBuffer = await page.pdf({
       width: '1280px', height: '720px', printBackground: true,
       margin: { top: 0, bottom: 0, left: 0, right: 0 },
