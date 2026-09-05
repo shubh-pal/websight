@@ -421,9 +421,16 @@ router.get('/leads/:id/email-draft', async (req, res) => {
   const verdict = geminiOutreach(lead);
 
   const subject = verdict?.email_subject || `A quick redesign idea for ${lead.name}`;
+  // No Gemini draft yet for this lead (qualified before that existed) — fall
+  // back to whatever real data we already have rather than an unbacked
+  // generic compliment. Re-running qualification backfills a proper
+  // Gemini-personalized opener.
+  const opener = (lead.rating && lead.reviews)
+    ? `I came across ${lead.name} online — a ${lead.rating}★ rating from ${lead.reviews} reviews says a lot about how well you take care of your customers.`
+    : `I came across ${lead.name} online and wanted to reach out directly.`;
   const body = verdict?.email_body || `Hi there,
 
-We really liked your website content, we really like your work and you have great reviews.
+${opener}
 
 I'm from India and I help businesses like yours grow and actually stand out against your competitors.
 
