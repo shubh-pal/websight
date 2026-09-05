@@ -118,12 +118,12 @@ function humanizeHost(host) {
 // place }) or directly from a website URL ({ source:'website', website, name? }).
 // Immediately kicks off scrape+audit+qualify so it starts moving right away.
 router.post('/leads/manual', async (req, res) => {
-  const { source, place, website, name, nicheId } = req.body || {};
+  const { source, place, website, name, nicheId, phone, contactEmail } = req.body || {};
   let business;
 
   if (source === 'place') {
     if (!place?.place_id) return res.status(400).json({ error: 'place.place_id is required' });
-    business = place;
+    business = { ...place };
   } else if (source === 'website') {
     const host = slugifyHost(website || '');
     if (!host) return res.status(400).json({ error: 'a valid website URL is required' });
@@ -139,6 +139,12 @@ router.post('/leads/manual', async (req, res) => {
   } else {
     return res.status(400).json({ error: "source must be 'place' or 'website'" });
   }
+
+  // Manually entered phone/email always win — Places never returns an email,
+  // and a hand-typed phone overrides whatever the API found (or fills it in
+  // for the website-only path, which has none).
+  if (phone && phone.trim()) business.phone = phone.trim();
+  if (contactEmail && contactEmail.trim()) business.contact_email = contactEmail.trim();
 
   const { id, created } = await store.createManualLead(business, nicheId || null);
   if (created) {

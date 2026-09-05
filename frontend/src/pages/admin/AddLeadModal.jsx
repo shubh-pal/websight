@@ -20,6 +20,11 @@ export default function AddLeadModal({ onClose }) {
   const [website, setWebsite] = useState('');
   const [name, setName] = useState('');
 
+  // shared — Places never returns an email, and a hand-typed phone overrides
+  // whatever the API found (or fills it in for the website-only path).
+  const [phone, setPhone] = useState('');
+  const [contactEmail, setContactEmail] = useState('');
+
   const [adding, setAdding] = useState(false);
   const [addErr, setAddErr] = useState('');
 
@@ -55,7 +60,12 @@ export default function AddLeadModal({ onClose }) {
       const res = await fetch(`${API}/leads/manual`, {
         method: 'POST', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...body, nicheId: nicheId || null }),
+        body: JSON.stringify({
+          ...body,
+          nicheId: nicheId || null,
+          phone: phone.trim() || undefined,
+          contactEmail: contactEmail.trim() || undefined,
+        }),
       });
       const d = await res.json();
       if (!res.ok) throw new Error(d.error || `HTTP ${res.status}`);
@@ -90,6 +100,17 @@ export default function AddLeadModal({ onClose }) {
               </select>
             </div>
           ) : null}
+
+          <div style={{ display: 'flex', gap: 8 }}>
+            <div style={{ flex: 1 }}>
+              <label style={label}>Phone (optional)</label>
+              <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+1 555 555 0100" style={input} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={label}>Email (optional)</label>
+              <input value={contactEmail} onChange={(e) => setContactEmail(e.target.value)} placeholder="contact@business.com" style={input} />
+            </div>
+          </div>
 
           {mode === 'place' ? (
             <>

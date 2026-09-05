@@ -67,14 +67,15 @@ async function createManualLead(b, nicheId = null) {
   const [row] = await q(
     `INSERT INTO leads
        (run_id, niche_id, place_id, name, country, city, category, address, phone, phone_intl,
-        website, rating, reviews, business_status, maps_uri, places_refreshed_at)
-     VALUES (NULL,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14, NOW())
+        website, rating, reviews, business_status, maps_uri, contact_email, places_refreshed_at)
+     VALUES (NULL,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15, NOW())
      ON CONFLICT (place_id) DO NOTHING
      RETURNING id`,
     [
       nicheId, b.place_id, b.name, b.country || null, b.city || null, b.category || null,
       b.address || null, b.phone || null, b.phone_intl || null, b.website || null,
       b.rating ?? null, b.reviews ?? null, b.business_status || null, b.maps_uri || null,
+      b.contact_email || null,
     ]
   );
   if (row) return { id: row.id, created: true };
