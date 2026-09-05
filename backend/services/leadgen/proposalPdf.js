@@ -298,25 +298,45 @@ async function buildProposalPdf(leadId) {
   ]);
 
   const html = renderHtml({ lead, company, designSystem, mockup, before });
+  const pdfBuffer = await renderPdf(html);
 
-  const browser = await puppeteer.launch({ headless: 'new', args: ['--no-sandbox', '--disable-setuid-sandbox'] });
+  const key = `companies/${leadId}/proposal.pdf`;
+  if (gcs.isEnabled) await gcs.uploadFile(key, pdfBuffer, 'application/pdf');
+  return { proposalKey: key, bytes: pdfBuffer.length };
+}
+
+// Puppeteer on Cloud Run (constrained memory, tiny /dev/shm) crashes Chromium
+// mid-render without these flags — "Navigating frame was detached" /
+// "Target closed". Matches services/scraper.js, which has run fine in prod.
+const LAUNCH_ARGS = ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'];
+
+async function renderPdfOnce(html) {
+  const browser = await puppeteer.launch({ headless: 'new', args: LAUNCH_ARGS });
   try {
     const page = await browser.newPage();
     await page.setViewport({ width: 1280, height: 720 });
-    await page.setContent(html, { waitUntil: 'networkidle0', timeout: 30000 });
-    // The @media-print-independent page-break-after rules above are always
-    // active (no @media print gate in the production CSS), but emulating
-    // print media is still the correct signal for Chrome's print pipeline.
+    // 'load' rather than 'networkidle0': the only external resource is the
+    // Google Fonts CSS, and networkidle0 can hang on Cloud Run's restricted
+    // egress waiting for it. 'load' fires once resources settle or error.
+    await page.setContent(html, { waitUntil: 'load', timeout: 30000 });
+    await page.evaluate(() => (document.fonts ? document.fonts.ready : null)).catch(() => {});
     await page.emulateMediaType('print');
-    const pdfBuffer = await page.pdf({
+    return await page.pdf({
       width: '1280px', height: '720px', printBackground: true,
       margin: { top: 0, bottom: 0, left: 0, right: 0 },
     });
-    const key = `companies/${leadId}/proposal.pdf`;
-    if (gcs.isEnabled) await gcs.uploadFile(key, pdfBuffer, 'application/pdf');
-    return { proposalKey: key, bytes: pdfBuffer.length };
   } finally {
-    await browser.close();
+    await browser.close().catch(() => {});
+  }
+}
+
+/** One retry with a fresh browser — the Chromium crashes are usually transient. */
+async function renderPdf(html) {
+  try {
+    return await renderPdfOnce(html);
+  } catch (err) {
+    console.warn(`[proposalPdf] render failed (${err.message}), retrying once`);
+    return renderPdfOnce(html);
   }
 }
 

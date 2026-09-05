@@ -596,7 +596,25 @@ router.post('/leads/:id/retry', async (req, res) => {
   const [lead] = await store.q(`SELECT * FROM leads WHERE id = $1`, [req.params.id]);
   if (!lead) return res.status(404).json({ error: 'Lead not found' });
   if (lead.status !== 'error') return res.status(400).json({ error: 'Lead is not in error state' });
-  const back = { scrape: 'discovered', audit: 'scraped', qualify: 'audited', redesign: 'qualified', pdf: 'redesigned' };
+
+  // A PDF-stage failure already has the mockup — just rebuild the PDF and
+  // advance, the same way receiveMockup's success path does.
+  if (lead.error_stage === 'pdf' && lead.mockup_gcs_key) {
+    try {
+      const { buildProposalPdf } = require('../../services/leadgen/proposalPdf');
+      const { proposalKey } = await buildProposalPdf(lead.id);
+      await store.updateLead(lead.id, { proposal_gcs_key: proposalKey, status: 'queued_for_contact', error: null, error_stage: null });
+      await store.recordEvent(lead.id, 'error', 'queued_for_contact', { manualRetry: true, stage: 'pdf' });
+      return res.json({ ok: true, status: 'queued_for_contact' });
+    } catch (err) {
+      return res.status(500).json({ error: `PDF rebuild failed again: ${err.message}` });
+    }
+  }
+
+  const back = {
+    scrape: 'discovered', audit: 'scraped', qualify: 'audited',
+    design: 'approved_ready_for_ui',
+  };
   const to = back[lead.error_stage] || 'discovered';
   await store.updateLead(lead.id, { status: to, error: null, error_stage: null });
   await store.recordEvent(lead.id, 'error', to, { manualRetry: true });
