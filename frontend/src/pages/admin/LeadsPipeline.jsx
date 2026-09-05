@@ -227,7 +227,14 @@ export default function LeadsPipeline() {
                   <td style={adminStyles.td}>{[l.city, l.country].filter(Boolean).join(', ') || '—'}</td>
                   <td style={adminStyles.td}>{l.category || '—'}</td>
                   <td style={adminStyles.td}>{l.audit_score ?? '—'}</td>
-                  <td style={adminStyles.td}><StageBadge status={l.status} /></td>
+                  <td style={adminStyles.td}>
+                    <StageBadge status={l.status} />
+                    {l.status === 'error' && l.error ? (
+                      <div style={errText} title={l.error}>
+                        {l.error_stage ? `${l.error_stage}: ` : ''}{l.error}
+                      </div>
+                    ) : null}
+                  </td>
                   <td style={adminStyles.td}>{l.qualify_value_usd ? `$${l.qualify_value_usd}` : '—'}</td>
                   <td style={adminStyles.td}>
                     {l.contact_email || l.phone || '—'}
@@ -266,6 +273,10 @@ const select = {
 };
 const link = { color: '#7dd3fc', textDecoration: 'none', fontWeight: 600 };
 const sub = { color: '#64748b', fontSize: 12, marginTop: 2 };
+const errText = {
+  marginTop: 4, maxWidth: 220, fontSize: 11, color: '#fca5a5',
+  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+};
 const btn = {
   primary: { border: 'none', borderRadius: 12, padding: '12px 16px', background: 'linear-gradient(135deg,#2563eb,#7c3aed)', color: '#fff', cursor: 'pointer', fontWeight: 700 },
   secondary: { border: '1px solid rgba(148,163,184,0.25)', borderRadius: 12, padding: '12px 16px', background: 'rgba(15,23,42,0.9)', color: '#e2e8f0', cursor: 'pointer', fontWeight: 600 },

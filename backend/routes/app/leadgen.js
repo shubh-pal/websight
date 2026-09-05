@@ -156,7 +156,11 @@ router.get('/leads/:id', async (req, res) => {
     media.logoIsManual = !!manual.logo;
     media.logoSourceUrl = sig.logo_url || null;
     media.mockup = asset(lead.mockup_gcs_key);
-    media.proposalPdf = asset(lead.proposal_gcs_key);
+    // Cache-bust: proposal.pdf keeps the same GCS key across rebuilds, but the
+    // asset stream is cached client-side (Cache-Control below) — without a
+    // version param a rebuilt PDF keeps showing the pre-rebuild cached copy.
+    const proposalUrl = asset(lead.proposal_gcs_key);
+    media.proposalPdf = proposalUrl ? `${proposalUrl}&v=${encodeURIComponent(new Date(lead.updated_at).getTime())}` : null;
     if (lead.gcs_prefix) {
       const root = lead.gcs_prefix.replace(/\/scrape$/, ''); // tolerate older rows
       const dsKey = `${root}/scrape/data/design-system.json`;
