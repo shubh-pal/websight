@@ -38,7 +38,7 @@ function artDirectionPrompt(lead, designSystem, company) {
     palette ? `Use this palette as inspiration (not literal): ${palette}.` : null,
     fonts.heading ? `Typography mood: ${fonts.heading} for headings, ${fonts.body || fonts.heading} for body text.` : null,
     'Output a single hero-section image at a realistic desktop viewport aspect ratio (roughly 16:9 to 16:10) — not a full-page scrolling mockup, not a browser chrome frame (the app wraps it in a device frame itself).',
-    'No placeholder "lorem ipsum" — use real, plausible headline and subhead copy for this specific business, not generic filler. But never invent specific verifiable claims that aren\'t actually visible in the screenshot or business data below — no made-up review counts, dollar figures recovered/saved, client counts, or guarantees. If you want a trust-signal stat and don\'t have a real one, write something qualitative ("Trusted locally for years") instead of a fabricated number.',
+    'No placeholder "lorem ipsum" — use real, plausible headline and subhead copy for this specific business, not generic filler. This is a visual UI reference only, not the final site or final copy, so illustrative trust-signal numbers (a star rating, a review count, "X years in business") are fine as placeholders to sell the layout — they do not need to be verified facts.',
     'Generate this once. Submit whatever you produce — do not regenerate multiple times chasing a better version; a human reviews it before it goes anywhere.',
     company?.tagline ? `This is a redesign pitch from an agency whose promise is: "${company.tagline}"` : null,
   ].filter(Boolean).join('\n');
