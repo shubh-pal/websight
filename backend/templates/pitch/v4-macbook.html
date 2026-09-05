@@ -4,11 +4,11 @@
 <meta charset="utf-8">
 <title>Pitch Deck — v4 MacBook</title>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&display=swap');
   :root { --ink:#142235; --navy:#10233b; --gold:#bd8a3d; --paper:#f6f1e8; --cream:#fffdf8; --muted:#68717d; --line:rgba(20,34,53,.15); --shadow:0 28px 70px rgba(22,31,45,.15); }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; }
-  body { background: #e9e1d4; font-family: 'DM Sans', sans-serif; }
+  body { background: #e9e1d4; font-family: 'Inter', sans-serif; }
   .toolbar { position: sticky; top: 0; z-index: 50; background: #10233b; color: #fff; padding: 10px 20px; font-size: 13px; display: flex; justify-content: space-between; align-items: center; }
   .toolbar span { color: #b7c0cc; }
   .stage { padding: 32px 0 100px; display: flex; flex-direction: column; align-items: center; gap: 28px; }
@@ -25,7 +25,7 @@
   .topline, .footer { display: flex; align-items: center; justify-content: space-between; }
   .brand { display: flex; align-items: center; gap: 12px; color: var(--navy); font-size: 12px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; }
   .brand::before { content:""; width: 32px; height: 2px; background: var(--gold); }
-  .index, .eyebrow { color: var(--gold); font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; }
+  .index, .eyebrow { color: var(--gold); font-family: 'Inter', sans-serif; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; }
   .index { color: rgba(20,34,53,.52); }
   h1, h2, h3, p { margin: 0; }
   h1, h2 { font-family: Fraunces, Georgia, serif; font-weight: 600; letter-spacing: -.055em; color: var(--navy); }
@@ -48,7 +48,7 @@
   .macbook .screen { position: relative; overflow: hidden; aspect-ratio: 16/10; padding: 11px; border: 5px solid #142235; border-radius: 17px 17px 7px 7px; background: #142235; }
   .macbook .camera { position: absolute; z-index: 2; top: 4px; left: 50%; width: 38px; height: 4px; border-radius: 10px; transform: translateX(-50%); background: #2e4056; }
   .macbook img, .macbook .ph { display: block; width: 100%; height: 100%; object-fit: cover; object-position: top; border-radius: 5px; background: #fff; }
-  .macbook .ph { display: flex; align-items: center; justify-content: center; background: #eef1f5; color: #94a3b8; font-family: 'DM Mono'; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+  .macbook .ph { display: flex; align-items: center; justify-content: center; background: #eef1f5; color: #94a3b8; font-family: 'Inter'; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
   .macbook .base { position: relative; width: 112%; height: 18px; margin-left: -6%; border-radius: 2px 2px 12px 12px; background: linear-gradient(#d9dce1,#9ea5ad); }
   .macbook .base::after { content:""; position: absolute; top: 0; left: 40%; width: 20%; height: 5px; border-radius: 0 0 5px 5px; background: #858d97; }
   .macbook.flat { width: 490px; transform: none; }
@@ -65,7 +65,7 @@
   .comparison-mockups { position: relative; height: 480px; }
   .comparison-mockups .current { position: absolute; top: 14px; right: 18px; width: 440px; transform: rotate(2.2deg); }
   .comparison-mockups .proposed { position: absolute; top: 170px; left: 0; width: 415px; transform: rotate(-2.3deg); }
-  .tag { position: absolute; z-index: 4; padding: 7px 9px; color: var(--cream); background: var(--navy); font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
+  .tag { position: absolute; z-index: 4; padding: 7px 9px; color: var(--cream); background: var(--navy); font-family: 'Inter', sans-serif; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
   .comparison-mockups .tag.current-tag { top: 0; right: 24px; }
   .comparison-mockups .tag.proposed-tag { top: 154px; left: 7px; background: var(--gold); }
 
@@ -73,7 +73,7 @@
   .design-copy p { max-width: 455px; margin-top: 22px; }
   .design-list { margin: 26px 0 0; padding: 0; list-style: none; border-top: 1px solid var(--line); }
   .design-list li { display: grid; grid-template-columns: 42px 1fr; gap: 12px; padding: 15px 0; border-bottom: 1px solid var(--line); color: var(--navy); font-size: 15px; font-weight: 600; }
-  .design-list span { color: var(--gold); font-family: 'DM Mono', monospace; font-size: 11px; padding-top: 3px; }
+  .design-list span { color: var(--gold); font-family: 'Inter', sans-serif; font-size: 11px; padding-top: 3px; }
   .visual { position: relative; min-height: 460px; display: flex; align-items: center; justify-content: center; }
   .visual .macbook { width: 550px; }
   .visual .callout { position: absolute; z-index: 3; padding: 14px 17px; max-width: 190px; background: rgba(255,253,248,.97); border: 1px solid var(--line); box-shadow: 0 13px 25px rgba(20,34,53,.11); }
@@ -105,7 +105,7 @@
   .contact-card h3 { margin: 14px 0 24px; color: var(--cream); font-family: Fraunces, Georgia, serif; font-size: 30px; letter-spacing: -.04em; }
   .contact-card dl { margin: 0; }
   .contact-card div { padding: 13px 0; border-top: 1px solid rgba(255,255,255,.2); }
-  .contact-card dt { margin-bottom: 5px; color: #deb878; font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; }
+  .contact-card dt { margin-bottom: 5px; color: #deb878; font-family: 'Inter', sans-serif; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; }
   .contact-card dd { margin: 0; color: rgba(255,255,255,.9); font-size: 15px; }
 
   .footer { margin-top: auto; padding-top: 20px; border-top: 1px solid var(--line); }
@@ -162,10 +162,9 @@ function render(D) {
     <div class="hero">
       <div class="hero-copy">
         <div class="eyebrow">Website redesign proposal</div>
-        <h1>${D.business.headline}</h1>
+        <h1>${D.business.name}, it's time to stand out online.</h1>
         <p class="lede">A focused redesign for high-intent visitors who need confidence, proof, and a clear reason to contact ${D.business.name} now.</p>
         <div class="rule"></div>
-        <p class="small-note">Prepared to make the digital experience feel as credible and considered as the work ${D.business.name} already does.</p>
       </div>
       <div class="mockup-wrap">
         <div class="halo"></div>
@@ -183,7 +182,6 @@ function render(D) {
       <div>
         <h2>When the site feels dated, the right lead keeps searching.</h2>
         <p class="lede">${D.business.positioning}</p>
-        <div class="detail"><strong>The redesign focus</strong><p>${D.business.auditReasons?.[0] || 'Clear hierarchy, stronger proof, and a path to contact that doesn\'t ask visitors to work for the answer.'}</p></div>
       </div>
       <div class="comparison-mockups">
         <span class="tag current-tag">Current experience</span>
@@ -223,7 +221,7 @@ function render(D) {
     <div class="topline"><div class="eyebrow">Investment</div><div class="index">04 / 05</div></div>
     <div class="offer">
       <div class="offer-copy">
-        <h2>A higher-value first impression, page by page.</h2>
+        <h2>Stand out against your competitors at the cost of just a dinner.</h2>
         <div class="price-line"><div class="price">${price}</div><div class="per">per page, fixed project pricing</div></div>
         <p class="lede">Not because the quality is lower — because the power of AI lets us spend less time on repetitive production, and more time on the decisions that make ${D.business.name} feel distinct.</p>
       </div>
