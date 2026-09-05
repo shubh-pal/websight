@@ -30,13 +30,16 @@ function artDirectionPrompt(lead, designSystem, company) {
   const palette = Object.entries(colors).filter(([, v]) => v).map(([k, v]) => `${k} ${v}`).join(', ');
 
   return [
-    `Design a modern, high-converting one-page website mockup for "${lead.name}", a ${lead.category || 'local business'} in ${[lead.city, lead.country].filter(Boolean).join(', ')}.`,
+    `Design ONLY the hero section (the first screen, above the fold) of a redesigned website for "${lead.name}", a ${lead.category || 'local business'} in ${[lead.city, lead.country].filter(Boolean).join(', ')}. Do not design a full page — no services grid, no stats section, no footer, no scrolling content below the hero. One screen only.`,
+    'The attached current-site screenshot is a CONTENT reference only — pull the business name, services offered, phone/contact info, and any credibility markers (reviews, years in business, guarantees) from it. Do NOT reuse its layout, its section structure, or its visual style. The goal is a fresh, modern hero that looks nothing like the original, not a cleaned-up copy of it.',
+    'Design direction: bold, contemporary, "wow"-first-impression UI — the kind of hero that makes someone stop scrolling. Think current design-award-site energy (confident type scale, real whitespace, one strong focal element), not a generic template with a headline + two buttons + a stock photo.',
     verdict?.pitch_angle ? `Positioning: ${verdict.pitch_angle}` : null,
     verdict?.summary ? `Context: ${verdict.summary}` : null,
     palette ? `Use this palette as inspiration (not literal): ${palette}.` : null,
     fonts.heading ? `Typography mood: ${fonts.heading} for headings, ${fonts.body || fonts.heading} for body text.` : null,
-    'Show a realistic desktop browser mockup: hero section with a clear headline and CTA, a services/features section, and a footer with contact info.',
-    'Clean, professional, mobile-friendly aesthetic. No placeholder "lorem ipsum" — use real, plausible copy for this business.',
+    'Output a single hero-section image at a realistic desktop viewport aspect ratio (roughly 16:9 to 16:10) — not a full-page scrolling mockup, not a browser chrome frame (the app wraps it in a device frame itself).',
+    'No placeholder "lorem ipsum" — use real, plausible headline and subhead copy for this specific business, not generic filler. But never invent specific verifiable claims that aren\'t actually visible in the screenshot or business data below — no made-up review counts, dollar figures recovered/saved, client counts, or guarantees. If you want a trust-signal stat and don\'t have a real one, write something qualitative ("Trusted locally for years") instead of a fabricated number.',
+    'Generate this once. Submit whatever you produce — do not regenerate multiple times chasing a better version; a human reviews it before it goes anywhere.',
     company?.tagline ? `This is a redesign pitch from an agency whose promise is: "${company.tagline}"` : null,
   ].filter(Boolean).join('\n');
 }
@@ -52,9 +55,9 @@ function createDesignMcpServer() {
       '1) list_pending_designs — only ever returns untouched leads (approved_ready_for_ui); a lead another run has already claimed or that failed will not reappear here. ' +
       '2) For each leadId, IMMEDIATELY call set_status(leadId, "in_progress") to claim it before doing any generation work — this is what keeps a second/overlapping run from picking up the same lead. ' +
       '3) get_design_brief(leadId) for the business info, current screenshot, and a ready-to-use art-direction prompt (this also marks it in_progress if you skipped step 2). ' +
-      '4) Generate the image however you have available. ' +
-      '5) On success: submit_design(leadId, imageBase64, filename) — uploads it and automatically builds + queues the pitch PDF. ' +
-      'On failure: set_status(leadId, "failed", note) so it is not retried in a loop; use set_status(leadId, "reset") later to make it eligible for list_pending_designs again.',
+      '4) Generate the image ONCE — hero section only (one screen), modern and distinctive, using the current screenshot for content, not as a layout to copy. Do not self-critique and regenerate multiple times looking for a "better" version: a human reviews every submission before it goes anywhere near a prospect, and will trigger a fresh attempt themselves (via set_status "reset") if a redo is actually needed. One generation, one submission, per lead, per run. ' +
+      '5) Submit that one image: submit_design(leadId, imageBase64, filename) — uploads it and automatically builds + queues the pitch PDF for human review. ' +
+      'Only call set_status(leadId, "failed", note) if generation itself errored out (not because you personally think the result could be better) — this exists so it is not retried in a loop; a human can set_status(leadId, "reset") later to make it eligible for list_pending_designs again.',
   });
 
   server.registerTool('list_pending_designs', {
@@ -90,7 +93,7 @@ function createDesignMcpServer() {
 
   server.registerTool('get_design_brief', {
     title: 'Get design brief',
-    description: 'Full brief for one lead: business info, audit findings, scraped design system, current screenshot (embedded image), and a ready-to-use art-direction prompt.',
+    description: 'Full brief for one lead: business info, audit findings, scraped design system, current screenshot (embedded image), and a ready-to-use art-direction prompt. Scope: generate the HERO SECTION ONLY (one screen, not a full page) — the current screenshot is content reference (business name/services/contact info), not a design/layout template to copy. Go modern and distinctive, not a lightly-restyled clone of the original.',
     inputSchema: { leadId: z.string().min(1) },
   }, async ({ leadId }) => {
     const [lead] = await store.q(`SELECT * FROM leads WHERE id = $1`, [leadId]);

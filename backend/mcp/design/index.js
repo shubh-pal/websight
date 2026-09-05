@@ -11,9 +11,11 @@ function boundedInteger(value, fallback, min, max) {
 }
 
 const host = process.env.MCP_DESIGN_HOST || '127.0.0.1';
-// Cloud Run injects PORT (its own listening contract) and expects the
-// container to bind exactly that — prefer it over the local-dev default.
-const port = boundedInteger(process.env.PORT || process.env.MCP_DESIGN_PORT, 3003, 1, 65535);
+// MCP_DESIGN_PORT wins when explicitly set (local dev, where PORT in the
+// same .env is the *main app's* port, not this one). Cloud Run never sets
+// MCP_DESIGN_PORT for this service, so it falls through to PORT — the
+// listening contract Cloud Run actually injects and expects.
+const port = boundedInteger(process.env.MCP_DESIGN_PORT || process.env.PORT, 3003, 1, 65535);
 const token = process.env.MCP_DESIGN_TOKEN;
 const allowedHosts = (process.env.MCP_DESIGN_ALLOWED_HOSTS || '')
   .split(',').map((v) => v.trim()).filter(Boolean);
