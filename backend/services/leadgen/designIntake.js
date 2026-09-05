@@ -52,10 +52,16 @@ async function receiveMockup(leadId, buffer, ext, { source = 'manual' } = {}) {
   }
 }
 
-/** List leads waiting on a redesign image (for the design MCP / a review page). */
+/**
+ * List leads waiting on a redesign image (for the design MCP / a review
+ * page). Deliberately only 'approved_ready_for_ui' — a lead already claimed
+ * (building_ui) has dropped off this list, so a second/concurrent scheduler
+ * run won't pick it up again mid-generation. A failed one (status 'error')
+ * is excluded too until explicitly reset.
+ */
 async function listPending(limit = 25) {
   return store.q(
-    `SELECT * FROM leads WHERE status IN ('approved_ready_for_ui', 'building_ui')
+    `SELECT * FROM leads WHERE status = 'approved_ready_for_ui'
       ORDER BY approved_at ASC NULLS LAST, updated_at ASC LIMIT $1`,
     [limit]
   );
@@ -70,4 +76,51 @@ async function markBuildingUi(leadId) {
   await store.recordEvent(leadId, 'approved_ready_for_ui', 'building_ui', { source: 'design-mcp' });
 }
 
-module.exports = { receiveMockup, listPending, markBuildingUi };
+// Only these two statuses belong to "waiting on a redesign image" — set_status
+// is scoped to claiming/failing within that phase, never to statuses owned by
+// later pipeline stages (building_pdf, contacted, etc).
+const DESIGN_PHASE_STATUSES = ['approved_ready_for_ui', 'building_ui'];
+
+/**
+ * Explicit claim/fail/reset for a lead in the design phase — lets a caller
+ * (e.g. a scheduled Codex run) mark "I'm working on this" before spending
+ * time on image generation, or "this failed" so it isn't silently retried
+ * forever, without needing the full get_design_brief/submit_design payload.
+ * @param {'in_progress'|'failed'|'reset'} action
+ * @returns {Promise<{status: string}>}
+ */
+async function setDesignStatus(leadId, action, note) {
+  const [lead] = await store.q(`SELECT * FROM leads WHERE id = $1`, [leadId]);
+  if (!lead) throw new Error('lead not found');
+  // 'reset' additionally accepts a design-phase failure (status 'error' with
+  // error_stage 'design') so a failed lead can be brought back — everything
+  // else is scoped strictly to approved_ready_for_ui / building_ui.
+  const inDesignPhase = DESIGN_PHASE_STATUSES.includes(lead.status)
+    || (action === 'reset' && lead.status === 'error' && lead.error_stage === 'design');
+  if (!inDesignPhase) {
+    throw new Error(`lead is '${lead.status}' — set_status only applies to leads in the design phase (approved_ready_for_ui, building_ui, or a design-stage failure)`);
+  }
+
+  if (action === 'in_progress') {
+    if (lead.status !== 'building_ui') {
+      await store.updateLead(leadId, { status: 'building_ui' });
+      await store.recordEvent(leadId, lead.status, 'building_ui', { source: 'design-mcp', note: note || undefined });
+    }
+    return { status: 'building_ui' };
+  }
+
+  if (action === 'failed') {
+    await store.markError(lead, 'design', new Error(note || 'design generation failed'));
+    return { status: 'error' };
+  }
+
+  if (action === 'reset') {
+    await store.updateLead(leadId, { status: 'approved_ready_for_ui', error: null, error_stage: null });
+    await store.recordEvent(leadId, lead.status, 'approved_ready_for_ui', { source: 'design-mcp', note: note || undefined });
+    return { status: 'approved_ready_for_ui' };
+  }
+
+  throw new Error(`unknown action '${action}' — expected in_progress, failed, or reset`);
+}
+
+module.exports = { receiveMockup, listPending, markBuildingUi, setDesignStatus };

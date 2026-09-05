@@ -48,15 +48,18 @@ function createDesignMcpServer() {
   }, {
     capabilities: { tools: {} },
     instructions:
-      'Workflow: 1) list_pending_designs to see leads waiting on a redesign image. ' +
-      '2) get_design_brief(leadId) for the business info, current screenshot, and a ready-to-use art-direction prompt. ' +
-      '3) Generate the image however you have available (your own image tool, or a human pastes the prompt into their own ChatGPT/image tool). ' +
-      '4) submit_design(leadId, imageBase64, filename) to upload it — this automatically builds and queues the pitch PDF.',
+      'Workflow, safe for a scheduled/unattended run: ' +
+      '1) list_pending_designs — only ever returns untouched leads (approved_ready_for_ui); a lead another run has already claimed or that failed will not reappear here. ' +
+      '2) For each leadId, IMMEDIATELY call set_status(leadId, "in_progress") to claim it before doing any generation work — this is what keeps a second/overlapping run from picking up the same lead. ' +
+      '3) get_design_brief(leadId) for the business info, current screenshot, and a ready-to-use art-direction prompt (this also marks it in_progress if you skipped step 2). ' +
+      '4) Generate the image however you have available. ' +
+      '5) On success: submit_design(leadId, imageBase64, filename) — uploads it and automatically builds + queues the pitch PDF. ' +
+      'On failure: set_status(leadId, "failed", note) so it is not retried in a loop; use set_status(leadId, "reset") later to make it eligible for list_pending_designs again.',
   });
 
   server.registerTool('list_pending_designs', {
     title: 'List pending designs',
-    description: 'Leads that are approved and waiting on a redesign mockup image.',
+    description: 'Leads that are approved and waiting on a redesign mockup image — excludes leads already claimed (in_progress) or marked failed.',
     inputSchema: { limit: z.number().int().min(1).max(100).optional() },
   }, async ({ limit }) => {
     const rows = await designIntake.listPending(limit || 25);
@@ -66,6 +69,23 @@ function createDesignMcpServer() {
       approvedAt: l.approved_at,
     }));
     return { content: [{ type: 'text', text: JSON.stringify(summary, null, 2) }] };
+  });
+
+  server.registerTool('set_status', {
+    title: 'Set design status',
+    description: 'Claim a lead before working on it, mark it failed if generation didn\'t work out, or reset it back to pending. Only valid while the lead is in the design phase (approved_ready_for_ui or building_ui) — call this before spending time generating an image, not after.',
+    inputSchema: {
+      leadId: z.string().min(1),
+      status: z.enum(['in_progress', 'failed', 'reset']),
+      note: z.string().max(500).optional().describe('Why it failed, or any other short note — recorded on the lead.'),
+    },
+  }, async ({ leadId, status, note }) => {
+    try {
+      const result = await designIntake.setDesignStatus(leadId, status, note);
+      return { content: [{ type: 'text', text: JSON.stringify({ ok: true, ...result }, null, 2) }] };
+    } catch (err) {
+      return { isError: true, content: [{ type: 'text', text: `set_status failed: ${err.message}` }] };
+    }
   });
 
   server.registerTool('get_design_brief', {
