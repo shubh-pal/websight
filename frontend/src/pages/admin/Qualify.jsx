@@ -9,7 +9,7 @@ const TABS = [
   ['audited', 'In review'],
   ['qualifying', 'Qualifying'],
   ['disqualified', 'Disqualified'],
-  ['building_pdf', 'Approved'],
+  ['approved_ready_for_ui', 'Approved'],
 ];
 
 export default function Qualify() {
@@ -128,7 +128,7 @@ function ReviewCard({ lead, detail, busy, onScore, onApprove, onReject }) {
 
           {['waiting_approval', 'audited', 'disqualified'].includes(lead.status) ? (
             <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-              <button onClick={onApprove} disabled={busy || lead.status !== 'waiting_approval'} style={btn.approve}>Approve → build PDF</button>
+              <button onClick={onApprove} disabled={busy || lead.status !== 'waiting_approval'} style={btn.approve}>Approve → queue for UI</button>
               <button onClick={onReject} disabled={busy || lead.status === 'disqualified'} style={btn.reject}>Reject</button>
             </div>
           ) : null}

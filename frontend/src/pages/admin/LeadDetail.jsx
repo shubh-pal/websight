@@ -19,6 +19,9 @@ export default function LeadDetail() {
   const [showPdf, setShowPdf] = useState(false);
   const [rebuildState, setRebuildState] = useState('idle'); // 'idle' | 'rebuilding' | 'rebuilt' | 'failed'
   const [showEmail, setShowEmail] = useState(false);
+  const [showCall, setShowCall] = useState(false);
+  const [showWhatsapp, setShowWhatsapp] = useState(false);
+  const [scoreInput, setScoreInput] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -34,6 +37,9 @@ export default function LeadDetail() {
   }, [id]);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    setScoreInput(data?.effectiveScore ?? data?.lead?.audit_score ?? '');
+  }, [data?.effectiveScore, data?.lead?.audit_score]);
 
   async function call(method, path, body, confirmMsg) {
     if (confirmMsg && !window.confirm(confirmMsg)) return false;
@@ -94,7 +100,7 @@ export default function LeadDetail() {
   if (loading) return <AdminLayout title="Lead"><div style={adminStyles.loadingCard}>Loading…</div></AdminLayout>;
   if (error) return <AdminLayout title="Lead"><div style={adminStyles.errorCard}>{error}</div></AdminLayout>;
 
-  const { lead, events, media = {}, notes = [], designSystem } = data;
+  const { lead, events, media = {}, notes = [], designSystem, threshold, effectiveScore } = data;
   const sig = lead.audit_signals || {};
   const auditing = ['scraping', 'auditing'].includes(lead.status);
   const ds = designSystem || {};
@@ -178,7 +184,38 @@ export default function LeadDetail() {
                 <Row k="Angle" v={lead.qualify_angle} />
                 <Row k="By" v={lead.qualified_by} />
               </>
-            : <div style={{ color: '#94a3b8' }}>not qualified yet</div>}
+            : <div style={{ color: '#94a3b8', marginBottom: 10 }}>not qualified yet</div>}
+
+          <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid rgba(148,163,184,0.14)' }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10 }}>
+              <span style={{ ...sub, minWidth: 40 }}>Score</span>
+              <input type="number" value={scoreInput} onChange={(e) => setScoreInput(e.target.value)} style={{ ...editInput, width: 64 }} />
+              <button
+                onClick={() => action('score', { score: Number(scoreInput) })}
+                disabled={busy || scoreInput === '' || Number(scoreInput) === effectiveScore}
+                style={miniBtn}
+              >
+                Set
+              </button>
+              {threshold != null ? (
+                <span style={sub}>
+                  threshold {threshold} · {Number(scoreInput) > threshold ? <span style={{ color: '#22c55e' }}>qualifies</span> : <span style={{ color: '#ef4444' }}>below</span>}
+                </span>
+              ) : null}
+              {lead.score_override != null ? <span style={{ ...sub, color: '#eab308' }}>overridden</span> : null}
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={() => action('approve')} disabled={busy || lead.status !== 'waiting_approval'} style={btn.approve}>
+                Approve → queue for UI
+              </button>
+              <button
+                onClick={() => { const r = window.prompt('Reject reason:', ''); if (r !== null) action('reject', { reason: r }); }}
+                disabled={busy || lead.status === 'disqualified'} style={btn.danger}
+              >
+                Reject
+              </button>
+            </div>
+          </div>
         </Card>
       </div>
 
@@ -198,15 +235,16 @@ export default function LeadDetail() {
           {media.beforeScreenshot ? <div style={{ ...sub, marginTop: 6 }}>{media.screenshotIsManual ? 'manual' : 'scraped'} · click to enlarge</div> : null}
 
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 16, marginBottom: 8 }}>
-            <span style={{ fontSize: 13, color: '#cbd5e1' }}>Logo {!media.logo ? <em style={{ ...tag, color: '#fca5a5', borderColor: '#fca5a5' }}>required</em> : null}</span>
+            <span style={{ fontSize: 13, color: '#cbd5e1' }}>Logo {!media.logo && !media.logoIsRemoved ? <em style={{ ...tag, color: '#fca5a5', borderColor: '#fca5a5' }}>required</em> : null}</span>
             <span>
               <UploadBtn label={media.logo ? 'Replace' : 'Upload'} accept="image/*" onFile={(f) => uploadAsset('logo', f)} />
-              {media.logoIsManual ? <button onClick={() => call('DELETE', '/asset/logo')} style={miniBtn}>revert</button> : null}
+              {media.logoIsManual ? <button onClick={() => call('DELETE', '/asset/logo')} style={miniBtn}>revert to scraped</button> : null}
+              {media.logo ? <button onClick={() => call('POST', '/asset/logo/remove')} style={miniBtn}>remove</button> : null}
             </span>
           </div>
           <Thumb
             src={media.logo} alt="Logo" contain height={90}
-            empty={media.logoSourceUrl ? 'found a logo URL but could not mirror it — upload manually' : 'no logo — upload one'}
+            empty={media.logoIsRemoved ? 'removed — this business has no logo' : media.logoSourceUrl ? 'found a logo URL but could not mirror it — upload manually' : 'no logo — upload one'}
             onClick={() => media.logo && setLightbox({ src: media.logo, label: 'Logo' })}
           />
         </Card>
@@ -256,6 +294,7 @@ export default function LeadDetail() {
             <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
               <button onClick={() => setShowPdf(true)} style={btn.primary}>Preview</button>
               <a href={media.proposalPdf} target="_blank" rel="noreferrer" style={btn.secondary}>Open in new tab</a>
+              <a href={media.proposalPdf} download={`${(lead.name || 'proposal').replace(/[^a-z0-9]+/gi, '-')}-proposal.pdf`} style={btn.secondary}>Download</a>
               <button
                 onClick={() => rebuildProposal('Rebuild the proposal PDF from the current mockup, lead data, and agency settings?')}
                 disabled={busy || rebuildState === 'rebuilding'} style={btn.secondary}
@@ -263,7 +302,6 @@ export default function LeadDetail() {
                 Rebuild
               </button>
               <RebuildStatus state={rebuildState} />
-              <button onClick={() => setShowEmail(true)} disabled={busy} style={btn.approve}>Send email</button>
               <span style={sub}>reflects the current mockup + agency settings</span>
             </div>
           ) : lead.mockup_gcs_key ? (
@@ -279,6 +317,20 @@ export default function LeadDetail() {
           )}
         </Card>
       </div>
+
+      {/* Row 3b — reach out, once there's a proposal to send */}
+      {media.proposalPdf ? (
+        <div style={{ marginTop: 16 }}>
+          <Card title="Contact">
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+              <button onClick={() => setShowCall(true)} disabled={busy} style={btn.primary}>Call</button>
+              <button onClick={() => setShowWhatsapp(true)} disabled={busy} style={btn.primary}>WhatsApp</button>
+              <button onClick={() => setShowEmail(true)} disabled={busy} style={btn.primary}>Send email</button>
+              <span style={sub}>each opens a Gemini-drafted script/message you review before acting</span>
+            </div>
+          </Card>
+        </div>
+      ) : null}
 
       {/* Row 4 — notes + timeline side by side */}
       <div style={{ ...grid2, marginTop: 16 }}>
@@ -324,7 +376,9 @@ export default function LeadDetail() {
 
       {lightbox ? <Lightbox {...lightbox} onClose={() => setLightbox(null)} /> : null}
       {showPdf && media.proposalPdf ? <PdfModal url={media.proposalPdf} onClose={() => setShowPdf(false)} /> : null}
-      {showEmail ? <EmailModal leadId={id} onClose={() => setShowEmail(false)} onSent={load} /> : null}
+      {showEmail ? <EmailModal leadId={id} proposalUrl={media.proposalPdf} onClose={() => setShowEmail(false)} onSent={load} /> : null}
+      {showCall ? <CallModal leadId={id} onClose={() => setShowCall(false)} onDone={load} /> : null}
+      {showWhatsapp ? <WhatsappModal leadId={id} onClose={() => setShowWhatsapp(false)} onDone={load} /> : null}
     </AdminLayout>
   );
 }
@@ -411,11 +465,12 @@ function PdfModal({ url, onClose }) {
   );
 }
 
-function EmailModal({ leadId, onClose, onSent }) {
+function EmailModal({ leadId, proposalUrl, onClose, onSent }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [form, setForm] = useState({ to: '', subject: '', body: '' });
   const [canSend, setCanSend] = useState(true);
+  const [aiGenerated, setAiGenerated] = useState(false);
   const [sendState, setSendState] = useState('idle'); // idle | sending | sent | failed
   const [sendError, setSendError] = useState('');
 
@@ -429,6 +484,7 @@ function EmailModal({ leadId, onClose, onSent }) {
         if (cancelled) return;
         setForm({ to: d.to || '', subject: d.subject || '', body: d.body || '' });
         setCanSend(!!d.canSend);
+        setAiGenerated(!!d.aiGenerated);
         if (!d.canSend) setError('Email sending is not configured on the server (Zoho SMTP env vars missing).');
       } catch (err) {
         if (!cancelled) setError(err.message);
@@ -462,29 +518,226 @@ function EmailModal({ leadId, onClose, onSent }) {
 
   return (
     <div style={backdrop} onClick={onClose}>
+      <div style={{ width: 920, maxWidth: '94vw', height: '86vh', background: '#1e293b', borderRadius: 14, overflow: 'hidden', display: 'flex', flexDirection: 'column' }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 16px', background: '#0f172a' }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ color: '#e2e8f0', fontSize: 13, fontWeight: 600 }}>Send proposal email</span>
+            {aiGenerated ? <span style={aiTag}>Gemini draft</span> : null}
+          </span>
+          <button onClick={onClose} style={miniBtn}>Close ✕</button>
+        </div>
+        <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
+          <div style={{ width: 420, flexShrink: 0, padding: 16, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10, borderRight: '1px solid rgba(148,163,184,0.14)' }}>
+            {loading ? <div style={{ color: '#94a3b8', fontSize: 13 }}>Loading draft…</div> : error && !canSend ? (
+              <div style={{ color: '#fca5a5', fontSize: 13 }}>{error}</div>
+            ) : (
+              <>
+                <label style={fieldLabel}>To</label>
+                <input value={form.to} onChange={(e) => setForm((f) => ({ ...f, to: e.target.value }))} style={fieldInput} placeholder="client@example.com" />
+                <label style={fieldLabel}>Subject</label>
+                <input value={form.subject} onChange={(e) => setForm((f) => ({ ...f, subject: e.target.value }))} style={fieldInput} />
+                <label style={fieldLabel}>Body</label>
+                <textarea value={form.body} onChange={(e) => setForm((f) => ({ ...f, body: e.target.value }))} style={{ ...fieldInput, flex: 1, minHeight: 180, resize: 'vertical', fontFamily: 'inherit' }} />
+                <div style={{ ...sub, fontSize: 11.5 }}>The proposal PDF (preview on the right) is attached automatically.</div>
+                <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 6, flexWrap: 'wrap' }}>
+                  <button onClick={send} disabled={sendState === 'sending' || sendState === 'sent'} style={btn.approve}>
+                    {sendState === 'sending' ? 'Sending…' : 'Send'}
+                  </button>
+                  {sendState === 'sent' ? <span style={{ color: '#22c55e', fontSize: 13 }}>Sent ✓</span> : null}
+                  {sendState === 'failed' ? <span style={{ color: '#fca5a5', fontSize: 13 }}>{sendError}</span> : null}
+                </div>
+              </>
+            )}
+          </div>
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+            {proposalUrl ? (
+              <>
+                <div style={{ padding: '8px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(2,6,23,0.4)' }}>
+                  <span style={sub}>Attachment preview</span>
+                  <a href={proposalUrl} download style={{ ...miniBtn, textDecoration: 'none' }}>Download PDF</a>
+                </div>
+                <iframe src={proposalUrl} title="Proposal attachment preview" style={{ flex: 1, border: 'none', background: '#fff' }} />
+              </>
+            ) : <div style={{ ...assetEmpty, margin: 16 }}>no proposal PDF to preview</div>}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CallModal({ leadId, onClose, onDone }) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [script, setScript] = useState('');
+  const [phone, setPhone] = useState('');
+  const [aiGenerated, setAiGenerated] = useState(false);
+  const [notes, setNotes] = useState('');
+  const [copied, setCopied] = useState(false);
+  const [markState, setMarkState] = useState('idle'); // idle | saving | done | failed
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`${API}/leads/${leadId}/call-script`, { credentials: 'include' });
+        const d = await res.json();
+        if (!res.ok) throw new Error(d.error || `HTTP ${res.status}`);
+        if (cancelled) return;
+        setScript(d.script || '');
+        setPhone(d.phone || '');
+        setAiGenerated(!!d.aiGenerated);
+      } catch (err) {
+        if (!cancelled) setError(err.message);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [leadId]);
+
+  async function copyScript() {
+    try { await navigator.clipboard.writeText(script); setCopied(true); setTimeout(() => setCopied(false), 2000); }
+    catch (_) { /* clipboard denied — nothing to fall back to here */ }
+  }
+
+  async function markCalled() {
+    setMarkState('saving');
+    try {
+      const res = await fetch(`${API}/leads/${leadId}/mark-contacted`, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel: 'call', note: notes }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || `HTTP ${res.status}`);
+      setMarkState('done');
+      onDone?.();
+      setTimeout(onClose, 900);
+    } catch (err) {
+      setMarkState('failed');
+      setError(err.message);
+    }
+  }
+
+  return (
+    <div style={backdrop} onClick={onClose}>
       <div style={{ width: 560, maxWidth: '92vw', maxHeight: '90vh', background: '#1e293b', borderRadius: 14, overflow: 'hidden', display: 'flex', flexDirection: 'column' }} onClick={(e) => e.stopPropagation()}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 16px', background: '#0f172a' }}>
-          <span style={{ color: '#e2e8f0', fontSize: 13, fontWeight: 600 }}>Send proposal email</span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ color: '#e2e8f0', fontSize: 13, fontWeight: 600 }}>Call script</span>
+            {aiGenerated ? <span style={aiTag}>Gemini draft</span> : null}
+          </span>
           <button onClick={onClose} style={miniBtn}>Close ✕</button>
         </div>
         <div style={{ padding: 16, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {loading ? <div style={{ color: '#94a3b8', fontSize: 13 }}>Loading draft…</div> : error && !canSend ? (
-            <div style={{ color: '#fca5a5', fontSize: 13 }}>{error}</div>
-          ) : (
+          {loading ? <div style={{ color: '#94a3b8', fontSize: 13 }}>Loading script…</div> : (
             <>
-              <label style={fieldLabel}>To</label>
-              <input value={form.to} onChange={(e) => setForm((f) => ({ ...f, to: e.target.value }))} style={fieldInput} placeholder="client@example.com" />
-              <label style={fieldLabel}>Subject</label>
-              <input value={form.subject} onChange={(e) => setForm((f) => ({ ...f, subject: e.target.value }))} style={fieldInput} />
-              <label style={fieldLabel}>Body</label>
-              <textarea value={form.body} onChange={(e) => setForm((f) => ({ ...f, body: e.target.value }))} style={{ ...fieldInput, height: 220, resize: 'vertical', fontFamily: 'inherit' }} />
-              <div style={{ ...sub, fontSize: 11.5 }}>The current proposal PDF will be attached automatically.</div>
-              <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 6 }}>
-                <button onClick={send} disabled={sendState === 'sending' || sendState === 'sent'} style={btn.approve}>
-                  {sendState === 'sending' ? 'Sending…' : 'Send'}
+              {phone ? <div style={sub}>Dial: <strong style={{ color: '#e2e8f0' }}>{phone}</strong></div> : <div style={{ ...sub, color: '#fca5a5' }}>no phone number on file</div>}
+              <label style={fieldLabel}>Script</label>
+              <textarea value={script} onChange={(e) => setScript(e.target.value)} style={{ ...fieldInput, height: 160, resize: 'vertical', fontFamily: 'inherit' }} />
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                <button onClick={copyScript} style={btn.secondary}>{copied ? 'Copied ✓' : 'Copy script'}</button>
+              </div>
+              <label style={fieldLabel}>Notes from the call</label>
+              <textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="What did they say? Any objections, follow-up date, etc." style={{ ...fieldInput, height: 90, resize: 'vertical', fontFamily: 'inherit' }} />
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 4 }}>
+                <button onClick={markCalled} disabled={markState === 'saving' || markState === 'done'} style={btn.approve}>
+                  {markState === 'saving' ? 'Saving…' : 'Mark as called'}
                 </button>
-                {sendState === 'sent' ? <span style={{ color: '#22c55e', fontSize: 13 }}>Sent ✓</span> : null}
-                {sendState === 'failed' ? <span style={{ color: '#fca5a5', fontSize: 13 }}>{sendError}</span> : null}
+                {markState === 'done' ? <span style={{ color: '#22c55e', fontSize: 13 }}>Saved ✓</span> : null}
+                {markState === 'failed' ? <span style={{ color: '#fca5a5', fontSize: 13 }}>{error}</span> : null}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function WhatsappModal({ leadId, onClose, onDone }) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+  const [phone, setPhone] = useState('');
+  const [aiGenerated, setAiGenerated] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [markState, setMarkState] = useState('idle');
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`${API}/leads/${leadId}/whatsapp-draft`, { credentials: 'include' });
+        const d = await res.json();
+        if (!res.ok) throw new Error(d.error || `HTTP ${res.status}`);
+        if (cancelled) return;
+        setMessage(d.message || '');
+        setPhone(d.phone || '');
+        setAiGenerated(!!d.aiGenerated);
+      } catch (err) {
+        if (!cancelled) setError(err.message);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [leadId]);
+
+  async function copyMessage() {
+    try { await navigator.clipboard.writeText(message); setCopied(true); setTimeout(() => setCopied(false), 2000); }
+    catch (_) { /* clipboard denied */ }
+  }
+
+  async function markSent() {
+    setMarkState('saving');
+    try {
+      const res = await fetch(`${API}/leads/${leadId}/mark-contacted`, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel: 'whatsapp' }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || `HTTP ${res.status}`);
+      setMarkState('done');
+      onDone?.();
+      setTimeout(onClose, 900);
+    } catch (err) {
+      setMarkState('failed');
+      setError(err.message);
+    }
+  }
+
+  const digits = phone.replace(/[^\d]/g, '');
+  const waUrl = digits ? `https://wa.me/${digits}?text=${encodeURIComponent(message)}` : null;
+
+  return (
+    <div style={backdrop} onClick={onClose}>
+      <div style={{ width: 520, maxWidth: '92vw', maxHeight: '90vh', background: '#1e293b', borderRadius: 14, overflow: 'hidden', display: 'flex', flexDirection: 'column' }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 16px', background: '#0f172a' }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ color: '#e2e8f0', fontSize: 13, fontWeight: 600 }}>WhatsApp message</span>
+            {aiGenerated ? <span style={aiTag}>Gemini draft</span> : null}
+          </span>
+          <button onClick={onClose} style={miniBtn}>Close ✕</button>
+        </div>
+        <div style={{ padding: 16, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {loading ? <div style={{ color: '#94a3b8', fontSize: 13 }}>Loading draft…</div> : (
+            <>
+              {phone ? <div style={sub}>To: <strong style={{ color: '#e2e8f0' }}>{phone}</strong></div> : <div style={{ ...sub, color: '#fca5a5' }}>no phone number on file — copy the message and send it manually</div>}
+              <label style={fieldLabel}>Message</label>
+              <textarea value={message} onChange={(e) => setMessage(e.target.value)} style={{ ...fieldInput, height: 130, resize: 'vertical', fontFamily: 'inherit' }} />
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                <button onClick={copyMessage} style={btn.secondary}>{copied ? 'Copied ✓' : 'Copy message'}</button>
+                {waUrl ? <a href={waUrl} target="_blank" rel="noreferrer" style={{ ...btn.primary, textDecoration: 'none' }}>Open in WhatsApp</a> : null}
+              </div>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 4 }}>
+                <button onClick={markSent} disabled={markState === 'saving' || markState === 'done'} style={btn.approve}>
+                  {markState === 'saving' ? 'Saving…' : 'Mark as sent'}
+                </button>
+                {markState === 'done' ? <span style={{ color: '#22c55e', fontSize: 13 }}>Saved ✓</span> : null}
+                {markState === 'failed' ? <span style={{ color: '#fca5a5', fontSize: 13 }}>{error}</span> : null}
               </div>
             </>
           )}
@@ -494,7 +747,8 @@ function EmailModal({ leadId, onClose, onSent }) {
   );
 }
 const fieldLabel = { color: '#94a3b8', fontSize: 11.5, textTransform: 'uppercase', letterSpacing: '0.04em' };
-const fieldInput = { padding: '9px 11px', borderRadius: 9, background: 'rgba(2,6,23,0.6)', border: '1px solid rgba(148,163,184,0.25)', color: '#e2e8f0', fontSize: 13.5 };
+const fieldInput = { padding: '9px 11px', borderRadius: 9, background: 'rgba(2,6,23,0.6)', border: '1px solid rgba(148,163,184,0.25)', color: '#e2e8f0', fontSize: 13.5, boxSizing: 'border-box' };
+const aiTag = { fontSize: 10.5, fontWeight: 700, letterSpacing: '0.03em', color: '#c4b5fd', background: 'rgba(139,92,246,0.16)', border: '1px solid rgba(139,92,246,0.4)', borderRadius: 999, padding: '2px 8px' };
 
 const grid3 = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 16 };
 const grid2 = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: 16 };

@@ -75,9 +75,10 @@ function createDesignMcpServer() {
   }, async ({ leadId }) => {
     const [lead] = await store.q(`SELECT * FROM leads WHERE id = $1`, [leadId]);
     if (!lead) return { isError: true, content: [{ type: 'text', text: `Lead ${leadId} not found` }] };
-    if (lead.status !== 'building_pdf') {
-      return { isError: true, content: [{ type: 'text', text: `Lead is '${lead.status}', expected 'building_pdf'.` }] };
+    if (!['approved_ready_for_ui', 'building_ui'].includes(lead.status)) {
+      return { isError: true, content: [{ type: 'text', text: `Lead is '${lead.status}', expected 'approved_ready_for_ui' or 'building_ui'.` }] };
     }
+    await designIntake.markBuildingUi(leadId); // first brief pull -> "actively being worked"
 
     const [designSystem, company] = await Promise.all([readDesignSystem(lead), settings.getCompany()]);
     const brief = {

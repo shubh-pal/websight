@@ -219,12 +219,14 @@ router.get('/leads/:id', async (req, res) => {
   let designSystem = null;
   if (gcs.isEnabled) {
     const asset = (key) => key ? `/api/app/leadgen/leads/${lead.id}/asset?key=${encodeURIComponent(key)}` : null;
-    const screenshotKey = manual.screenshot || sig.screenshot;
-    const logoKey = manual.logo || sig.logo;
+    const screenshotKey = manual.screenshot_removed ? null : (manual.screenshot || sig.screenshot);
+    const logoKey = manual.logo_removed ? null : (manual.logo || sig.logo);
     media.beforeScreenshot = asset(screenshotKey);
     media.screenshotIsManual = !!manual.screenshot;
+    media.screenshotIsRemoved = !!manual.screenshot_removed;
     media.logo = asset(logoKey);
     media.logoIsManual = !!manual.logo;
+    media.logoIsRemoved = !!manual.logo_removed;
     media.logoSourceUrl = sig.logo_url || null;
     media.mockup = asset(lead.mockup_gcs_key);
     // Cache-bust: proposal.pdf keeps the same GCS key across rebuilds, but the
@@ -248,7 +250,7 @@ router.get('/leads/:id', async (req, res) => {
 
 // Upload / replace a lead asset. Body: { kind: 'screenshot'|'logo'|'mockup', filename, dataBase64 }
 // 'mockup' is special: it's the redesign image, so it also flips the lead to
-// ui_generated and auto-builds the pitch PDF (see services/leadgen/designIntake.js).
+// building_pdf and auto-builds the pitch PDF (see services/leadgen/designIntake.js).
 const ASSET_EXT = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', svg: 'image/svg+xml', gif: 'image/gif' };
 router.post('/leads/:id/asset', async (req, res) => {
   if (!gcs.isEnabled) return res.status(503).json({ error: 'GCS not configured' });
@@ -277,9 +279,28 @@ router.post('/leads/:id/asset', async (req, res) => {
   if (!lead) return res.status(404).json({ error: 'Lead not found' });
   const key = `companies/${lead.id}/manual/${kind}.${ext === 'jpeg' ? 'jpg' : ext}`;
   await gcs.uploadFile(key, buf, contentType);
-  await store.updateLead(lead.id, { manual_assets: { ...(lead.manual_assets || {}), [kind]: key } });
+  // Uploading a new asset supersedes an earlier "remove" — undo that flag.
+  const nextAssets = { ...(lead.manual_assets || {}), [kind]: key };
+  delete nextAssets[`${kind}_removed`];
+  await store.updateLead(lead.id, { manual_assets: nextAssets });
   await store.recordEvent(lead.id, null, null, { uploaded: kind, by: req.user?.email || 'admin' });
   res.json({ ok: true, kind, key });
+});
+
+// Fully clear an asset (logo/screenshot) — unlike DELETE /asset/:kind (which
+// only reverts a manual upload back to the auto-scraped one), this blanks it
+// out regardless of source, e.g. when a business genuinely has no logo.
+router.post('/leads/:id/asset/:kind/remove', async (req, res) => {
+  const { kind } = req.params;
+  if (!['screenshot', 'logo'].includes(kind)) return res.status(400).json({ error: 'bad kind' });
+  const [lead] = await store.q(`SELECT id, manual_assets FROM leads WHERE id = $1`, [req.params.id]);
+  if (!lead) return res.status(404).json({ error: 'Lead not found' });
+  const next = { ...(lead.manual_assets || {}) };
+  delete next[kind];
+  next[`${kind}_removed`] = true;
+  await store.updateLead(lead.id, { manual_assets: next });
+  await store.recordEvent(lead.id, null, null, { removed: kind, by: req.user?.email || 'admin' });
+  res.json({ ok: true });
 });
 
 // Remove a manual asset override (revert to the scraped one).
@@ -309,7 +330,7 @@ router.patch('/leads/:id', async (req, res) => {
   res.json(updated);
 });
 
-// Approve a waiting_approval lead -> build the pitch PDF (Phase D worker).
+// Approve a waiting_approval lead -> queued for the design MCP / manual upload.
 router.post('/leads/:id/approve', async (req, res) => {
   const [lead] = await store.q(`SELECT * FROM leads WHERE id = $1`, [req.params.id]);
   if (!lead) return res.status(404).json({ error: 'Lead not found' });
@@ -317,12 +338,12 @@ router.post('/leads/:id/approve', async (req, res) => {
     return res.status(400).json({ error: `lead is ${lead.status}, expected waiting_approval` });
   }
   await store.updateLead(lead.id, {
-    status: 'building_pdf',
+    status: 'approved_ready_for_ui',
     approved_at: new Date().toISOString(),
     approved_by: req.user?.email || 'admin',
   });
-  await store.recordEvent(lead.id, lead.status, 'building_pdf', { by: req.user?.email || 'admin' });
-  res.json({ ok: true, status: 'building_pdf' });
+  await store.recordEvent(lead.id, lead.status, 'approved_ready_for_ui', { by: req.user?.email || 'admin' });
+  res.json({ ok: true, status: 'approved_ready_for_ui' });
 });
 
 // Reject a lead during review.
@@ -381,16 +402,27 @@ router.post('/leads/:id/rebuild-proposal', async (req, res) => {
   }
 });
 
+// A lead in any of these statuses hasn't been reached out to yet — any of the
+// three contact actions (call/whatsapp/email) advances it to 'contacted'.
+const PRE_CONTACT_STATUSES = ['queued_for_contact', 'building_pdf', 'approved_ready_for_ui', 'building_ui'];
+
+function geminiOutreach(lead) {
+  return lead.qualify_raw && !lead.qualify_raw.error ? lead.qualify_raw : null;
+}
+
 // Draft the outreach email — prefilled subject/body for the compose modal.
 // Not a send; purely computed from lead + company data each time it's opened.
+// Prefers Gemini's own draft (written at qualification time) and falls back
+// to a plain template for leads qualified before that existed.
 router.get('/leads/:id/email-draft', async (req, res) => {
   const [lead] = await store.q(`SELECT * FROM leads WHERE id = $1`, [req.params.id]);
   if (!lead) return res.status(404).json({ error: 'Lead not found' });
   const company = await settings.getCompany();
+  const verdict = geminiOutreach(lead);
 
   const angle = lead.qualify_angle || `I noticed ${lead.name}'s website could use a refresh to better convert visitors.`;
-  const subject = `A quick redesign idea for ${lead.name}`;
-  const body = `Hi there,
+  const subject = verdict?.email_subject || `A quick redesign idea for ${lead.name}`;
+  const body = verdict?.email_body || `Hi there,
 
 ${angle}
 
@@ -407,6 +439,7 @@ ${company.website || ''}`;
     body,
     canSend: mailer.isEnabled,
     hasProposal: !!lead.proposal_gcs_key,
+    aiGenerated: !!verdict?.email_body,
   });
 });
 
@@ -432,14 +465,55 @@ router.post('/leads/:id/send-email', async (req, res) => {
       attachmentName: `${(lead.name || 'proposal').replace(/[^a-z0-9]+/gi, '-')}-proposal.pdf`,
     });
     await store.recordOutreach(lead.id, { to, subject, body, espMessageId: messageId });
-    const nextStatus = ['queued_for_mail', 'building_pdf', 'ui_generated'].includes(lead.status) ? 'contacted' : lead.status;
+    const nextStatus = PRE_CONTACT_STATUSES.includes(lead.status) ? 'contacted' : lead.status;
     await store.updateLead(lead.id, { status: nextStatus });
-    await store.recordEvent(lead.id, lead.status, nextStatus, { by: req.user?.email || 'admin', to, subject, messageId });
+    await store.recordEvent(lead.id, lead.status, nextStatus, { channel: 'email', by: req.user?.email || 'admin', to, subject, messageId });
     res.json({ ok: true, status: nextStatus, messageId });
   } catch (err) {
     try { await store.recordOutreach(lead.id, { to, subject, body, status: 'failed' }); } catch (_) { /* best effort */ }
     res.status(500).json({ error: err.message });
   }
+});
+
+// Draft the phone-call script (Gemini-written at qualification time; falls
+// back to a plain skeleton for leads qualified before this existed).
+router.get('/leads/:id/call-script', async (req, res) => {
+  const [lead] = await store.q(`SELECT * FROM leads WHERE id = $1`, [req.params.id]);
+  if (!lead) return res.status(404).json({ error: 'Lead not found' });
+  const verdict = geminiOutreach(lead);
+  const script = (verdict?.call_script || `Hi, is this ${lead.name}? I put together a quick redesign concept for your website and ` +
+    `wanted to see if you'd be open to a short look. ${lead.qualify_angle || ''}`).trim();
+  res.json({ script, phone: lead.phone_intl || lead.phone || '', aiGenerated: !!verdict?.call_script });
+});
+
+// Draft the WhatsApp message (Gemini-written at qualification time). No send
+// API — the popup opens a wa.me deep link with this text pre-filled, or lets
+// the admin copy it, and the admin sends it themselves from their own WhatsApp.
+router.get('/leads/:id/whatsapp-draft', async (req, res) => {
+  const [lead] = await store.q(`SELECT * FROM leads WHERE id = $1`, [req.params.id]);
+  if (!lead) return res.status(404).json({ error: 'Lead not found' });
+  const verdict = geminiOutreach(lead);
+  const message = verdict?.whatsapp_message ||
+    `Hi! I put together a quick website redesign concept for ${lead.name} — mind if I send it over?`;
+  res.json({ message, phone: lead.phone_intl || lead.phone || '', aiGenerated: !!verdict?.whatsapp_message });
+});
+
+// Manually mark a lead as contacted via a channel with no delivery
+// confirmation (a phone call, or a WhatsApp message sent from the admin's own
+// phone) — optionally logging a note in the same call. Email marks itself
+// contacted on send; this covers the other two Contact-card buttons.
+router.post('/leads/:id/mark-contacted', async (req, res) => {
+  const { channel, note } = req.body || {};
+  if (!['call', 'whatsapp'].includes(channel)) return res.status(400).json({ error: "channel must be 'call' or 'whatsapp'" });
+  const [lead] = await store.q(`SELECT * FROM leads WHERE id = $1`, [req.params.id]);
+  if (!lead) return res.status(404).json({ error: 'Lead not found' });
+
+  const nextStatus = PRE_CONTACT_STATUSES.includes(lead.status) ? 'contacted' : lead.status;
+  await store.updateLead(lead.id, { status: nextStatus });
+  await store.recordEvent(lead.id, lead.status, nextStatus, { channel, by: req.user?.email || 'admin' });
+  await store.recordOutreach(lead.id, { to: lead.phone_intl || lead.phone || '', subject: null, body: note || null, status: 'sent' });
+  if (note && note.trim()) await store.addNote(lead.id, note.trim(), req.user?.email || 'admin');
+  res.json({ ok: true, status: nextStatus });
 });
 
 // Notes.

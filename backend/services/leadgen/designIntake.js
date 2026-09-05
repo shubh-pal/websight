@@ -1,8 +1,14 @@
 /**
  * Single entry point for "a redesign mockup image arrived for this lead" —
  * used by the manual dashboard upload AND the design MCP's submit_design
- * tool. Stores the image, flips the lead to ui_generated, then immediately
- * builds the pitch PDF (Puppeteer only — no paid API call) and queues it.
+ * tool. Stores the image, flips the lead to building_pdf, then immediately
+ * builds the pitch PDF (Puppeteer only — no paid API call) and queues it for
+ * contact.
+ *
+ * Status flow after approval:
+ *   approved_ready_for_ui  -- design MCP pulls the brief -->  building_ui
+ *   (either of those)      -- mockup arrives            -->  building_pdf
+ *   building_pdf            -- PDF built                -->  queued_for_contact
  */
 const gcs = require('../gcsStorage');
 const store = require('./store');
@@ -14,7 +20,7 @@ const CONTENT_TYPE = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', 
 // after the proposal already went out, so a correction just rebuilds the PDF
 // and re-queues it.
 const MOCKUP_ELIGIBLE_STATUSES = [
-  'building_pdf', 'ui_generated', 'queued_for_mail',
+  'approved_ready_for_ui', 'building_ui', 'building_pdf', 'queued_for_contact',
   'contacted', 'replied', 'bounced', 'error',
 ];
 
@@ -32,16 +38,16 @@ async function receiveMockup(leadId, buffer, ext, { source = 'manual' } = {}) {
 
   const key = `companies/${leadId}/mockup.${ext === 'jpeg' ? 'jpg' : ext}`;
   await gcs.uploadFile(key, buffer, contentType);
-  await store.updateLead(leadId, { mockup_gcs_key: key, status: 'ui_generated', error: null, error_stage: null });
-  await store.recordEvent(leadId, lead.status, 'ui_generated', { source });
+  await store.updateLead(leadId, { mockup_gcs_key: key, status: 'building_pdf', error: null, error_stage: null });
+  await store.recordEvent(leadId, lead.status, 'building_pdf', { source });
 
   try {
     const { proposalKey } = await buildProposalPdf(leadId);
-    await store.updateLead(leadId, { proposal_gcs_key: proposalKey, status: 'queued_for_mail' });
-    await store.recordEvent(leadId, 'ui_generated', 'queued_for_mail', { source: 'auto-pdf' });
-    return { status: 'queued_for_mail', mockupKey: key, proposalKey };
+    await store.updateLead(leadId, { proposal_gcs_key: proposalKey, status: 'queued_for_contact' });
+    await store.recordEvent(leadId, 'building_pdf', 'queued_for_contact', { source: 'auto-pdf' });
+    return { status: 'queued_for_contact', mockupKey: key, proposalKey };
   } catch (err) {
-    await store.markError({ id: leadId, status: 'ui_generated', attempts: lead.attempts }, 'pdf', err);
+    await store.markError({ id: leadId, status: 'building_pdf', attempts: lead.attempts }, 'pdf', err);
     throw err;
   }
 }
@@ -49,9 +55,19 @@ async function receiveMockup(leadId, buffer, ext, { source = 'manual' } = {}) {
 /** List leads waiting on a redesign image (for the design MCP / a review page). */
 async function listPending(limit = 25) {
   return store.q(
-    `SELECT * FROM leads WHERE status = 'building_pdf' ORDER BY approved_at ASC NULLS LAST, updated_at ASC LIMIT $1`,
+    `SELECT * FROM leads WHERE status IN ('approved_ready_for_ui', 'building_ui')
+      ORDER BY approved_at ASC NULLS LAST, updated_at ASC LIMIT $1`,
     [limit]
   );
 }
 
-module.exports = { receiveMockup, listPending };
+/** The design MCP pulled the brief for this lead — mark it actively in progress. */
+async function markBuildingUi(leadId) {
+  const [lead] = await store.q(`SELECT id, status FROM leads WHERE id = $1`, [leadId]);
+  if (!lead) return;
+  if (lead.status !== 'approved_ready_for_ui') return;
+  await store.updateLead(leadId, { status: 'building_ui' });
+  await store.recordEvent(leadId, 'approved_ready_for_ui', 'building_ui', { source: 'design-mcp' });
+}
+
+module.exports = { receiveMockup, listPending, markBuildingUi };

@@ -1,7 +1,7 @@
 export const STAGE_ORDER = [
   'discovered', 'scraping', 'scraped', 'auditing', 'audited',
   'qualifying', 'waiting_approval', 'disqualified',
-  'building_pdf', 'ui_generated', 'pdf_ready', 'queued_for_mail',
+  'approved_ready_for_ui', 'building_ui', 'building_pdf', 'queued_for_contact',
   'contacted', 'replied', 'bounced', 'unsubscribed',
   'closed', 'error',
 ];
@@ -11,7 +11,7 @@ const STAGE_COLOR = {
   auditing: '#6366f1', audited: '#6366f1',
   qualifying: '#a855f7', waiting_approval: '#eab308', disqualified: '#ef4444',
   qualified: '#22c55e', rejected: '#ef4444',
-  building_pdf: '#f59e0b', ui_generated: '#a855f7', pdf_ready: '#14b8a6', queued_for_mail: '#22c55e',
+  approved_ready_for_ui: '#eab308', building_ui: '#8b5cf6', building_pdf: '#f59e0b', queued_for_contact: '#22c55e',
   ready_to_send: '#22c55e', on_hold: '#94a3b8',
   contacted: '#3b82f6', replied: '#22c55e', bounced: '#ef4444', unsubscribed: '#94a3b8',
   closed: '#475569', error: '#ef4444',

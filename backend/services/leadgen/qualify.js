@@ -24,12 +24,24 @@ const SCHEMA = z.object({
   pitch_angle: z.string().max(400),
   red_flags: z.array(z.string()).max(10),
   summary: z.string().max(600),
+  // Outreach drafts, written once here so the admin never stares at a blank
+  // compose box — reviewed/edited in the Contact card popups, never auto-sent.
+  call_script: z.string().max(1200),
+  email_subject: z.string().max(150),
+  email_body: z.string().max(1500),
+  whatsapp_message: z.string().max(500),
 });
 
-const SYSTEM = `You assess whether a local business is a good prospect for a freelance website redesign service.
+const SYSTEM = `You assess whether a local business is a good prospect for a freelance website redesign service, and draft the first outreach for it.
 The service: a modern responsive redesign delivered in ~1 week for USD 200-1000.
 Good prospects: an operating business with real customers whose current site is dated, slow, not mobile-friendly, on a weak builder, or missing entirely — and who can be reached.
 Poor prospects: businesses that already have a strong modern site, national chains / franchises with in-house teams, closed businesses, or ones with no reachable contact.
+
+Also draft three outreach pieces an admin can review, edit, and send themselves — never invent facts not given (no fake case studies, no guessing who answers the phone):
+- call_script: a natural, spoken-language opener for a cold phone call — a greeting, who's calling and why, the one-sentence pitch angle, and a soft ask to send the redesign over. No stage directions, just what to say.
+- email_subject / email_body: a short, plain-text email (no markdown). Mention the proposal PDF is attached. Sign off with the agency's name and website exactly as given below.
+- whatsapp_message: one or two short, casual sentences — WhatsApp register, not an email in disguise.
+
 Return ONLY JSON matching exactly:
 {
   "recommendation": "pursue" | "skip",
@@ -37,7 +49,11 @@ Return ONLY JSON matching exactly:
   "estimated_value_usd": integer 200-1000,
   "pitch_angle": "one specific sentence you would open the outreach with",
   "red_flags": ["short phrases", ...],
-  "summary": "2-3 sentences for the reviewer"
+  "summary": "2-3 sentences for the reviewer",
+  "call_script": "...",
+  "email_subject": "...",
+  "email_body": "...",
+  "whatsapp_message": "..."
 }`;
 
 async function readScrapeExtract(lead) {
@@ -57,7 +73,7 @@ async function readScrapeExtract(lead) {
   }
 }
 
-function buildUserPrompt(lead, extract, signals) {
+function buildUserPrompt(lead, extract, signals, company) {
   return JSON.stringify({
     business: {
       name: lead.name, category: lead.category, city: lead.city, country: lead.country,
@@ -73,11 +89,16 @@ function buildUserPrompt(lead, extract, signals) {
       copyright_year: signals.copyright_year,
     },
     current_site: extract,
+    agency: {
+      name: company?.name || 'the agency', website: company?.website || null,
+      price_per_page: company?.price_per_page ?? company?.price_min ?? 200,
+    },
   });
 }
 
 async function qualifyLead(lead) {
   const cfg = await settings.get();
+  const company = await settings.getCompany();
   const signals = lead.audit_signals || {};
   const extract = await readScrapeExtract(lead);
 
@@ -86,7 +107,7 @@ async function qualifyLead(lead) {
     const client = createAIClient(cfg.gemini_model || 'vertex-gemini-2.5-flash');
     // gemini-2.5-flash is a thinking model on Vertex and thinking tokens count
     // against the output budget — give it room so the JSON isn't truncated.
-    const raw = await client.complete(SYSTEM, buildUserPrompt(lead, extract, signals), 4000, { isJson: true });
+    const raw = await client.complete(SYSTEM, buildUserPrompt(lead, extract, signals, company), 4000, { isJson: true });
     verdict = SCHEMA.parse(JSON.parse(raw));
   } catch (err) {
     console.warn(`[qualify] Gemini failed for ${lead.id}: ${err.message}`);
