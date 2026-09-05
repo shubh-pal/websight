@@ -134,6 +134,11 @@ const CSS = `
   .contact-card div { padding: 13px 0; border-top: 1px solid rgba(255,255,255,.2); }
   .contact-card dt { margin-bottom: 5px; color: #deb878; font-family: 'Inter', sans-serif; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; }
   .contact-card dd { margin: 0; color: rgba(255,255,255,.9); font-size: 15px; }
+  .interest-btn {
+    display: block; margin-top: 22px; padding: 14px 20px; border-radius: 8px; text-align: center;
+    background: var(--gold); color: var(--navy); font-family: 'Inter', sans-serif; font-weight: 700;
+    font-size: 14px; letter-spacing: .01em; text-decoration: none;
+  }
 
   .footer { margin-top: auto; padding-top: 20px; border-top: 1px solid var(--line); }
   .footer p { font-size: 11px; }
@@ -151,6 +156,12 @@ function renderHtml({ lead, company, designSystem, mockup, before }) {
   const agencyName = esc(company.name || 'Your Agency');
   const price = `$${company.price_per_page ?? company.price_min ?? 200}`;
   const paletteLine = Object.values(colors).filter(Boolean).slice(0, 3).join(' / ') || 'Pulled straight from the current site';
+  // Always the agency's own live app (which serves this route) — never the
+  // prospect's company.website. FRONTEND_URL is deliberately not used as a
+  // fallback: in local dev it points at the separate Vite port, which does
+  // not serve /interested (only the backend does).
+  const appBase = (process.env.APP_URL || `http://localhost:${process.env.PORT || 3001}`).replace(/\/+$/, '');
+  const interestUrl = `${appBase}/interested/${lead.id}`;
 
   return `<!doctype html><html><head><meta charset="utf-8"><style>${CSS}</style></head><body>
 
@@ -258,6 +269,7 @@ function renderHtml({ lead, company, designSystem, mockup, before }) {
           <div><dt>Phone</dt><dd>${esc(company.contact_phone)}</dd></div>
           <div><dt>Website</dt><dd>${esc(company.website)}</dd></div>
         </dl>
+        <a class="interest-btn" href="${interestUrl}">Yes, I'm interested &rarr;</a>
       </div>
     </div>
     <div class="footer"><p>${name}</p><p>Prepared exclusively for this proposal</p></div>

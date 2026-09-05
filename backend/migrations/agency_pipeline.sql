@@ -180,3 +180,6 @@ INSERT INTO niches (name, slug, search_terms, locations) VALUES
    '[{"country":"US","cities":["Austin, TX","Denver, CO"]},
      {"country":"GB","cities":["Manchester","Leeds","Bristol"]}]'::jsonb)
 ON CONFLICT (slug) DO NOTHING;
+
+-- Public "Yes, I'm interested" button on the pitch PDF's last page.
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS interested_at TIMESTAMPTZ;

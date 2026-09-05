@@ -21,6 +21,7 @@ const adminRouter = require('./routes/admin');
 const imagesRouter = require('./routes/images');
 const publicScrapeRouter = require('./routes/publicScrape');
 const appPipelineRouter = require('./routes/app');
+const interestRouter = require('./routes/interest');
 const { findJobIdBySubdomain, getDistDir, registerSubdomain } = require('./services/publisher');
 const path = require('path');
 const fs = require('fs');
@@ -177,6 +178,7 @@ app.use('/api/images', imagesRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/public', publicScrapeRouter);
 app.use('/api/app', appPipelineRouter);
+app.use('/', interestRouter);
 
 // Health check endpoint
 app.get('/api/health', (_, res) => res.json({ status: 'ok', version: '1.0.0' }));

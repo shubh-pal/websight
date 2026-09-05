@@ -469,6 +469,7 @@ function EmailModal({ leadId, proposalUrl, onClose, onSent }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [form, setForm] = useState({ to: '', subject: '', body: '' });
+  const [from, setFrom] = useState('');
   const [canSend, setCanSend] = useState(true);
   const [aiGenerated, setAiGenerated] = useState(false);
   const [sendState, setSendState] = useState('idle'); // idle | sending | sent | failed
@@ -483,6 +484,7 @@ function EmailModal({ leadId, proposalUrl, onClose, onSent }) {
         if (!res.ok) throw new Error(d.error || `HTTP ${res.status}`);
         if (cancelled) return;
         setForm({ to: d.to || '', subject: d.subject || '', body: d.body || '' });
+        setFrom(d.from || '');
         setCanSend(!!d.canSend);
         setAiGenerated(!!d.aiGenerated);
         if (!d.canSend) setError('Email sending is not configured on the server (Zoho SMTP env vars missing).');
@@ -532,6 +534,8 @@ function EmailModal({ leadId, proposalUrl, onClose, onSent }) {
               <div style={{ color: '#fca5a5', fontSize: 13 }}>{error}</div>
             ) : (
               <>
+                <label style={fieldLabel}>From</label>
+                <input value={from} disabled style={{ ...fieldInput, color: '#94a3b8', cursor: 'not-allowed' }} />
                 <label style={fieldLabel}>To</label>
                 <input value={form.to} onChange={(e) => setForm((f) => ({ ...f, to: e.target.value }))} style={fieldInput} placeholder="client@example.com" />
                 <label style={fieldLabel}>Subject</label>

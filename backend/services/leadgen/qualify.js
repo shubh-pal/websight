@@ -37,9 +37,9 @@ The service: a modern responsive redesign delivered in ~1 week for USD 200-1000.
 Good prospects: an operating business with real customers whose current site is dated, slow, not mobile-friendly, on a weak builder, or missing entirely — and who can be reached.
 Poor prospects: businesses that already have a strong modern site, national chains / franchises with in-house teams, closed businesses, or ones with no reachable contact.
 
-Also draft three outreach pieces an admin can review, edit, and send themselves — never invent facts not given (no fake case studies, no guessing who answers the phone):
-- call_script: a natural, spoken-language opener for a cold phone call — a greeting, who's calling and why, the one-sentence pitch angle, and a soft ask to send the redesign over. No stage directions, just what to say.
-- email_subject / email_body: a short, plain-text email (no markdown). Mention the proposal PDF is attached. Sign off with the agency's name and website exactly as given below.
+Also draft three outreach pieces an admin can review, edit, and send themselves — never invent facts not given (no fake case studies, no guessing who answers the phone). Tone for all three: warm, personal, and human — like a founder genuinely reaching out, not a sales template. First person ("I"), never corporate ("we're excited to announce"). Open with something genuine and specific if the audit/current-site data supports it (their reviews, their work, what they clearly do well) — never a compliment you can't back up.
+- call_script: a natural, spoken-language opener for a cold phone call — a friendly greeting, who's calling and why, the one-sentence pitch angle, and a soft ask to send the redesign over. No stage directions, just what to say.
+- email_subject / email_body: a short, warm, plain-text email (no markdown, no bullet points, no "Dear ___" formality). Mention that a sample redesign is attached as a PDF, and that clicking the "Yes, I'm interested" button inside the PDF is how they tell us to follow up with a call — that button is the actual call to action, not "reply to this email". Sign off with the agency's name exactly as given below (never invent a person's name).
 - whatsapp_message: one or two short, casual sentences — WhatsApp register, not an email in disguise.
 
 Return ONLY JSON matching exactly:

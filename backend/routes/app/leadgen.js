@@ -420,21 +420,23 @@ router.get('/leads/:id/email-draft', async (req, res) => {
   const company = await settings.getCompany();
   const verdict = geminiOutreach(lead);
 
-  const angle = lead.qualify_angle || `I noticed ${lead.name}'s website could use a refresh to better convert visitors.`;
   const subject = verdict?.email_subject || `A quick redesign idea for ${lead.name}`;
   const body = verdict?.email_body || `Hi there,
 
-${angle}
+We really liked your website content, we really like your work and you have great reviews.
 
-I put together a short proposal showing what this could look like — attached as a PDF.
+I'm from India and I help businesses like yours grow and actually stand out against your competitors.
 
-Worth a quick look?
+So I've created a sample redesign of your website, I've attached it in the mail. I'd love for you to check it out — if you like it, simply click the "Yes, I'm interested" button inside the PDF and we'll give you a call.
 
-${company.name || 'Your Agency'}
-${company.website || ''}`;
+In the age of AI, this is a pressing opportunity for making your digital presence stand out with AI. Hope to hear from you soon.
+
+Warm regards,
+Shubh`;
 
   res.json({
     to: lead.contact_email || '',
+    from: `${company.name || 'Your Agency'} <${process.env.ZOHO_SMTP_USER || ''}>`,
     subject,
     body,
     canSend: mailer.isEnabled,
