@@ -18,6 +18,7 @@ export default function LeadDetail() {
   const [lightbox, setLightbox] = useState(null); // { src, label }
   const [showPdf, setShowPdf] = useState(false);
   const [rebuildState, setRebuildState] = useState('idle'); // 'idle' | 'rebuilding' | 'rebuilt' | 'failed'
+  const [showEmail, setShowEmail] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -262,6 +263,7 @@ export default function LeadDetail() {
                 Rebuild
               </button>
               <RebuildStatus state={rebuildState} />
+              <button onClick={() => setShowEmail(true)} disabled={busy} style={btn.approve}>Send email</button>
               <span style={sub}>reflects the current mockup + agency settings</span>
             </div>
           ) : lead.mockup_gcs_key ? (
@@ -322,6 +324,7 @@ export default function LeadDetail() {
 
       {lightbox ? <Lightbox {...lightbox} onClose={() => setLightbox(null)} /> : null}
       {showPdf && media.proposalPdf ? <PdfModal url={media.proposalPdf} onClose={() => setShowPdf(false)} /> : null}
+      {showEmail ? <EmailModal leadId={id} onClose={() => setShowEmail(false)} onSent={load} /> : null}
     </AdminLayout>
   );
 }
@@ -408,6 +411,91 @@ function PdfModal({ url, onClose }) {
   );
 }
 
+function EmailModal({ leadId, onClose, onSent }) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [form, setForm] = useState({ to: '', subject: '', body: '' });
+  const [canSend, setCanSend] = useState(true);
+  const [sendState, setSendState] = useState('idle'); // idle | sending | sent | failed
+  const [sendError, setSendError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`${API}/leads/${leadId}/email-draft`, { credentials: 'include' });
+        const d = await res.json();
+        if (!res.ok) throw new Error(d.error || `HTTP ${res.status}`);
+        if (cancelled) return;
+        setForm({ to: d.to || '', subject: d.subject || '', body: d.body || '' });
+        setCanSend(!!d.canSend);
+        if (!d.canSend) setError('Email sending is not configured on the server (Zoho SMTP env vars missing).');
+      } catch (err) {
+        if (!cancelled) setError(err.message);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [leadId]);
+
+  async function send() {
+    if (!form.to || !form.subject || !form.body) { setSendError('To, subject, and body are all required.'); return; }
+    setSendState('sending');
+    setSendError('');
+    try {
+      const res = await fetch(`${API}/leads/${leadId}/send-email`, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || `HTTP ${res.status}`);
+      setSendState('sent');
+      onSent?.();
+      setTimeout(onClose, 1200);
+    } catch (err) {
+      setSendState('failed');
+      setSendError(err.message);
+    }
+  }
+
+  return (
+    <div style={backdrop} onClick={onClose}>
+      <div style={{ width: 560, maxWidth: '92vw', maxHeight: '90vh', background: '#1e293b', borderRadius: 14, overflow: 'hidden', display: 'flex', flexDirection: 'column' }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 16px', background: '#0f172a' }}>
+          <span style={{ color: '#e2e8f0', fontSize: 13, fontWeight: 600 }}>Send proposal email</span>
+          <button onClick={onClose} style={miniBtn}>Close ✕</button>
+        </div>
+        <div style={{ padding: 16, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {loading ? <div style={{ color: '#94a3b8', fontSize: 13 }}>Loading draft…</div> : error && !canSend ? (
+            <div style={{ color: '#fca5a5', fontSize: 13 }}>{error}</div>
+          ) : (
+            <>
+              <label style={fieldLabel}>To</label>
+              <input value={form.to} onChange={(e) => setForm((f) => ({ ...f, to: e.target.value }))} style={fieldInput} placeholder="client@example.com" />
+              <label style={fieldLabel}>Subject</label>
+              <input value={form.subject} onChange={(e) => setForm((f) => ({ ...f, subject: e.target.value }))} style={fieldInput} />
+              <label style={fieldLabel}>Body</label>
+              <textarea value={form.body} onChange={(e) => setForm((f) => ({ ...f, body: e.target.value }))} style={{ ...fieldInput, height: 220, resize: 'vertical', fontFamily: 'inherit' }} />
+              <div style={{ ...sub, fontSize: 11.5 }}>The current proposal PDF will be attached automatically.</div>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 6 }}>
+                <button onClick={send} disabled={sendState === 'sending' || sendState === 'sent'} style={btn.approve}>
+                  {sendState === 'sending' ? 'Sending…' : 'Send'}
+                </button>
+                {sendState === 'sent' ? <span style={{ color: '#22c55e', fontSize: 13 }}>Sent ✓</span> : null}
+                {sendState === 'failed' ? <span style={{ color: '#fca5a5', fontSize: 13 }}>{sendError}</span> : null}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+const fieldLabel = { color: '#94a3b8', fontSize: 11.5, textTransform: 'uppercase', letterSpacing: '0.04em' };
+const fieldInput = { padding: '9px 11px', borderRadius: 9, background: 'rgba(2,6,23,0.6)', border: '1px solid rgba(148,163,184,0.25)', color: '#e2e8f0', fontSize: 13.5 };
+
 const grid3 = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 16 };
 const grid2 = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: 16 };
 const a = { color: '#7dd3fc' };
@@ -421,4 +509,5 @@ const btn = {
   primary: { border: 'none', borderRadius: 12, padding: '10px 16px', background: 'linear-gradient(135deg,#2563eb,#7c3aed)', color: '#fff', cursor: 'pointer', fontWeight: 700, fontSize: 14 },
   secondary: { border: '1px solid rgba(148,163,184,0.25)', borderRadius: 12, padding: '10px 14px', background: 'rgba(15,23,42,0.9)', color: '#e2e8f0', cursor: 'pointer', fontWeight: 600, textDecoration: 'none', fontSize: 14 },
   danger: { border: '1px solid rgba(248,113,113,0.3)', borderRadius: 12, padding: '10px 14px', background: 'rgba(127,29,29,0.4)', color: '#fecaca', cursor: 'pointer', fontWeight: 600 },
+  approve: { border: 'none', borderRadius: 12, padding: '10px 16px', background: 'linear-gradient(135deg,#16a34a,#22c55e)', color: '#fff', cursor: 'pointer', fontWeight: 700, fontSize: 14 },
 };

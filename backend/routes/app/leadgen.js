@@ -11,6 +11,7 @@ const settings = require('../../services/leadgen/settings');
 const { reevaluate } = require('../../services/leadgen/qualify');
 const designIntake = require('../../services/leadgen/designIntake');
 const gcs = require('../../services/gcsStorage');
+const mailer = require('../../services/leadgen/mailer');
 
 const router = express.Router();
 
@@ -139,6 +140,7 @@ router.get('/leads/:id', async (req, res) => {
     [req.params.id]
   );
   const notes = await store.listNotes(req.params.id);
+  const outreach = await store.listOutreach(req.params.id);
 
   // Assets are streamed back through this API (works with plain ADC — no
   // service-account signing key needed locally or on Cloud Run).
@@ -172,7 +174,7 @@ router.get('/leads/:id', async (req, res) => {
   const threshold = await settings.minScoreFor(lead);
   const effectiveScore = lead.score_override ?? lead.audit_score ?? null;
 
-  res.json({ lead, events, media, notes, designSystem, threshold, effectiveScore });
+  res.json({ lead, events, media, notes, outreach, designSystem, threshold, effectiveScore });
 });
 
 // Upload / replace a lead asset. Body: { kind: 'screenshot'|'logo'|'mockup', filename, dataBase64 }
@@ -306,6 +308,67 @@ router.post('/leads/:id/rebuild-proposal', async (req, res) => {
     await store.recordEvent(lead.id, lead.status, lead.status, { rebuiltProposal: true, by: req.user?.email || 'admin' });
     res.json({ ok: true, proposalKey });
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Draft the outreach email — prefilled subject/body for the compose modal.
+// Not a send; purely computed from lead + company data each time it's opened.
+router.get('/leads/:id/email-draft', async (req, res) => {
+  const [lead] = await store.q(`SELECT * FROM leads WHERE id = $1`, [req.params.id]);
+  if (!lead) return res.status(404).json({ error: 'Lead not found' });
+  const company = await settings.getCompany();
+
+  const angle = lead.qualify_angle || `I noticed ${lead.name}'s website could use a refresh to better convert visitors.`;
+  const subject = `A quick redesign idea for ${lead.name}`;
+  const body = `Hi there,
+
+${angle}
+
+I put together a short proposal showing what this could look like — attached as a PDF.
+
+Worth a quick look?
+
+${company.name || 'Your Agency'}
+${company.website || ''}`;
+
+  res.json({
+    to: lead.contact_email || '',
+    subject,
+    body,
+    canSend: mailer.isEnabled,
+    hasProposal: !!lead.proposal_gcs_key,
+  });
+});
+
+// Send the drafted email (admin-reviewed/edited) with the proposal PDF
+// attached. Manual, one-lead-at-a-time — not a bulk sender.
+router.post('/leads/:id/send-email', async (req, res) => {
+  if (!mailer.isEnabled) return res.status(503).json({ error: 'Email sending is not configured (ZOHO_SMTP_USER / ZOHO_SMTP_PASS missing)' });
+  const { to, subject, body } = req.body || {};
+  if (!to || !subject || !body) return res.status(400).json({ error: 'to, subject, and body are required' });
+
+  const [lead] = await store.q(`SELECT * FROM leads WHERE id = $1`, [req.params.id]);
+  if (!lead) return res.status(404).json({ error: 'Lead not found' });
+  if (!lead.proposal_gcs_key) return res.status(400).json({ error: 'Lead has no proposal PDF yet — build one first.' });
+  if (await store.isSuppressed(to)) return res.status(400).json({ error: `${to} is on the suppression list` });
+
+  const company = await settings.getCompany();
+  try {
+    const { messageId } = await mailer.sendMail({
+      to, subject, body,
+      fromName: company.name,
+      replyTo: company.contact_email,
+      attachmentKey: lead.proposal_gcs_key,
+      attachmentName: `${(lead.name || 'proposal').replace(/[^a-z0-9]+/gi, '-')}-proposal.pdf`,
+    });
+    await store.recordOutreach(lead.id, { to, subject, body, espMessageId: messageId });
+    const nextStatus = ['queued_for_mail', 'building_pdf', 'ui_generated'].includes(lead.status) ? 'contacted' : lead.status;
+    await store.updateLead(lead.id, { status: nextStatus });
+    await store.recordEvent(lead.id, lead.status, nextStatus, { by: req.user?.email || 'admin', to, subject, messageId });
+    res.json({ ok: true, status: nextStatus, messageId });
+  } catch (err) {
+    try { await store.recordOutreach(lead.id, { to, subject, body, status: 'failed' }); } catch (_) { /* best effort */ }
     res.status(500).json({ error: err.message });
   }
 });

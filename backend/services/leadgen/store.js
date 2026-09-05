@@ -143,6 +143,24 @@ async function summary() {
   return Object.fromEntries(rows.map((r) => [r.status, r.count]));
 }
 
+async function isSuppressed(email) {
+  if (!email) return false;
+  const [row] = await q(`SELECT 1 FROM suppressions WHERE email = $1`, [email.toLowerCase()]);
+  return !!row;
+}
+
+async function recordOutreach(leadId, { to, subject, body, espMessageId, status = 'sent' }) {
+  await q(
+    `INSERT INTO outreach_messages (lead_id, to_address, subject, body, esp_message_id, status, sent_at)
+     VALUES ($1,$2,$3,$4,$5,$6, CASE WHEN $6 = 'sent' THEN NOW() ELSE NULL END)`,
+    [leadId, to, subject, body, espMessageId || null, status]
+  );
+}
+
+async function listOutreach(leadId) {
+  return q(`SELECT * FROM outreach_messages WHERE lead_id = $1 ORDER BY created_at DESC`, [leadId]);
+}
+
 module.exports = {
   q,
   createRun,
@@ -158,4 +176,7 @@ module.exports = {
   listNotes,
   deleteNote,
   summary,
+  isSuppressed,
+  recordOutreach,
+  listOutreach,
 };
